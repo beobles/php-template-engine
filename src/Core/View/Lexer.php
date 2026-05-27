@@ -30,16 +30,14 @@ class Lexer
         $pos = 0;
 
         while ($pos < $length) {
-            // Detectar keywords
-            if (preg_match('/^extends\b/', substr($content, $pos)) === 1) {
-                $tokens[] = ['type' => 'KEYWORD', 'value' => 'extends'];
-                $pos += 7;
-                continue;
-            }
-
-            if (preg_match('/^import\b/', substr($content, $pos)) === 1) {
-                $tokens[] = ['type' => 'KEYWORD', 'value' => 'import'];
-                $pos += 6;
+            // Detectar diretivas por keyword (ex.: extends "base.html";)
+            if (preg_match('/^(extends|import)\b\s*[^;]*;/', substr($content, $pos), $matches) === 1) {
+                $tokens[] = [
+                    'type' => self::TOKEN_KEYWORD,
+                    'value' => trim($matches[0]),
+                    'length' => strlen($matches[0]),
+                ];
+                $pos += strlen($matches[0]);
                 continue;
             }
 
