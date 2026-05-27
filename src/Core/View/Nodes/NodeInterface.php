@@ -2,15 +2,24 @@
 
 namespace Beobles\Core\View\Nodes;
 
+use Beobles\Core\View\Compilation\CompilationContext;
+
 /**
- * Interface para nós da AST
+ * Contrato para todos os nós da AST.
+ *
+ * Cada nó é responsável por:
+ *   - Representar um fragmento semântico do template
+ *   - Saber como compilar a si mesmo via compile()
  */
 interface NodeInterface
 {
     /**
-     * Retorna string de representação
-     * 
-     * @return string
+     * Compila o nó, escrevendo código PHP no contexto de compilação.
+     */
+    public function compile(CompilationContext $ctx): void;
+
+    /**
+     * Retorna representação legível do nó (para debug/dump).
      */
     public function __toString(): string;
 }

@@ -7,6 +7,7 @@ use Beobles\Core\View\Cache\FileCacheAdapter;
 use Beobles\Core\View\Components\ComponentRegistry;
 use Beobles\Core\View\Exceptions\ViewException;
 use Beobles\Core\View\Filters\FilterRegistry;
+use Beobles\Core\View\NodeVisitor\NodeVisitorInterface;
 
 /**
  * Motor de Template Engine Principal
@@ -15,7 +16,7 @@ use Beobles\Core\View\Filters\FilterRegistry;
  */
 class Engine
 {
-    private const CACHE_VERSION = '3';
+    private const CACHE_VERSION = '4';
     private string $templatesDir;
     private string $cacheDir;
     private bool $autoEscape;
@@ -121,6 +122,14 @@ class Engine
         } catch (\Exception $e) {
             throw new ViewException("Error rendering template '{$templatePath}': " . $e->getMessage(), 0, $e);
         }
+    }
+
+    /**
+     * Registra um visitante de nós para análise ou transformação da AST.
+     */
+    public function addVisitor(NodeVisitorInterface $visitor): void
+    {
+        $this->compiler->addVisitor($visitor);
     }
 
     /**
