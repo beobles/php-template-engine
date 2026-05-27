@@ -16,7 +16,7 @@ use Core\View\NodeVisitor\NodeVisitorInterface;
  */
 class Engine
 {
-    private const CACHE_VERSION = '4';
+    private const CACHE_VERSION = '5';
     private string $templatesDir;
     private string $cacheDir;
     private bool $autoEscape;
@@ -102,6 +102,9 @@ class Engine
             if ($content === false) {
                 throw new ViewException("Unable to read template: {$templatePath}");
             }
+
+            // Resolver herança de templates (extends + blocks)
+            $content = $this->resolveTemplateInheritance($content, $absolutePath, [$absolutePath]);
 
             // Tokenizar
             $tokens = $this->lexer->tokenize($content);
@@ -197,6 +200,68 @@ class Engine
     {
         $modifiedAt = file_exists($absolutePath) ? (string) filemtime($absolutePath) : '0';
         return 'template_' . md5(self::CACHE_VERSION . '|' . $absolutePath . '|' . $modifiedAt);
+    }
+
+    /**
+     * Resolve herança de template via `extends "path";` e sobrescrita de <Block>.
+     *
+     * @param string[] $stack
+     */
+    private function resolveTemplateInheritance(string $content, string $currentPath, array $stack): string
+    {
+        if (preg_match('/^\s*extends\s+["\']([^"\']+)["\']\s*;/i', $content, $match) !== 1) {
+            return $content;
+        }
+
+        $parentRelativePath = trim($match[1]);
+        $parentAbsolutePath = $this->resolveTemplatePath($parentRelativePath);
+
+        if (!file_exists($parentAbsolutePath)) {
+            throw new ViewException("Parent template not found: {$parentRelativePath}");
+        }
+
+        if (in_array($parentAbsolutePath, $stack, true)) {
+            throw new ViewException("Circular extends detected: {$parentRelativePath}");
+        }
+
+        $parentContent = file_get_contents($parentAbsolutePath);
+        if ($parentContent === false) {
+            throw new ViewException("Unable to read parent template: {$parentRelativePath}");
+        }
+
+        $childContent = preg_replace('/^\s*extends\s+["\']([^"\']+)["\']\s*;[ \t]*\R?/i', '', $content, 1) ?? $content;
+        $parentResolved = $this->resolveTemplateInheritance($parentContent, $parentAbsolutePath, [...$stack, $parentAbsolutePath]);
+
+        return $this->mergeBlocks($parentResolved, $childContent);
+    }
+
+    /**
+     * @return array<string,string>
+     */
+    private function extractBlocks(string $content): array
+    {
+        $blocks = [];
+        preg_match_all('/<Block\s+name\s*=\s*["\']([^"\']+)["\']\s*>(.*?)<\/Block>/is', $content, $matches, PREG_SET_ORDER);
+
+        foreach ($matches as $match) {
+            $blocks[$match[1]] = $match[2];
+        }
+
+        return $blocks;
+    }
+
+    private function mergeBlocks(string $parentContent, string $childContent): string
+    {
+        $childBlocks = $this->extractBlocks($childContent);
+
+        return (string) preg_replace_callback(
+            '/<Block\s+name\s*=\s*["\']([^"\']+)["\']\s*>(.*?)<\/Block>/is',
+            static function (array $match) use ($childBlocks): string {
+                $name = $match[1];
+                return $childBlocks[$name] ?? $match[2];
+            },
+            $parentContent
+        );
     }
 
     /**

@@ -13,9 +13,7 @@ class CloseTagNode implements NodeInterface
 
     public function compile(CompilationContext $ctx): void
     {
-        if ($this->tagName === 'Block') {
-            $ctx->writeLine('ob_get_clean();');
-        } else {
+        if ($this->tagName !== 'Block') {
             $ctx->writeLine('}');
         }
     }

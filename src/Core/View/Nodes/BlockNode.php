@@ -7,8 +7,8 @@ use Core\View\Compilation\CompilationContext;
 /**
  * Representa a abertura de um bloco de layout.
  *
- * Em tempo de compilação emite ob_start(); o conteúdo é capturado
- * até o CloseTagNode correspondente emitir ob_get_clean().
+ * A resolução de herança (extends/override) ocorre antes da compilação.
+ * Aqui o bloco atua apenas como marcador sem emitir código.
  */
 class BlockNode implements NodeInterface
 {
@@ -16,7 +16,7 @@ class BlockNode implements NodeInterface
 
     public function compile(CompilationContext $ctx): void
     {
-        $ctx->writeLine('ob_start(); // block: ' . $this->name);
+        // No-op: conteúdo interno do bloco já deve ser emitido normalmente.
     }
 
     public function __toString(): string
