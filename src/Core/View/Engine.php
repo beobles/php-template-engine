@@ -120,14 +120,16 @@ class Engine
             // Compilar
             $compiledCode = $this->compiler->compile($ast);
 
+            // Renderizar
+            $output = $this->renderer->render($compiledCode, $data, $this);
+
             // Cachear se habilitado
             if ($this->cacheEnabled) {
                 $this->cacheManager->set($cacheKey, $compiledCode);
             }
 
-            // Renderizar
-            return $this->renderer->render($compiledCode, $data, $this);
-        } catch (\Exception $e) {
+            return $output;
+        } catch (\Throwable $e) {
             throw new ViewException("Error rendering template '{$templatePath}': " . $e->getMessage(), 0, $e);
         }
     }
