@@ -7,7 +7,6 @@ use Beobles\Core\View\Nodes\ExpressionNode;
 use Beobles\Core\View\Nodes\RawNode;
 use Beobles\Core\View\Nodes\ComponentNode;
 use Beobles\Core\View\Nodes\IfNode;
-use Beobles\Core\View\Exceptions\ParserException;
 
 /**
  * Parser de AST (Abstract Syntax Tree)
@@ -47,6 +46,11 @@ class Parser
                 if ($node) {
                     $nodes[] = $node;
                 }
+            } elseif ($token['type'] === 'TAG_CLOSE') {
+                $node = $this->parseCloseTag();
+                if ($node) {
+                    $nodes[] = $node;
+                }
             } elseif ($token['type'] === 'KEYWORD') {
                 $node = $this->parseKeyword();
                 if ($node) {
@@ -75,16 +79,36 @@ class Parser
         switch ($tagName) {
             case 'If':
                 return $this->parseIfTag($token);
+            case 'Else':
+                return new ElseNode();
+            case 'ElseIf':
+                return $this->parseElseIfTag($token);
             case 'Block':
                 return $this->parseBlockTag($token);
             case 'Foreach':
                 return $this->parseForEachTag($token);
             case 'Component':
-            case preg_match('/^[A-Z]/', $tagName) ? $tagName : null:
                 return $this->parseComponentTag($token);
             default:
+                if (preg_match('/^[A-Z]/', $tagName) === 1) {
+                    return $this->parseComponentTag($token);
+                }
                 return null;
         }
+    }
+
+    /**
+     * Parse de tag de fechamento
+     */
+    private function parseCloseTag(): ?object
+    {
+        $token = $this->current();
+        $this->advance();
+
+        return match ($token['name']) {
+            'If', 'Foreach', 'Block' => new CloseTagNode($token['name']),
+            default => null,
+        };
     }
 
     /**
@@ -111,11 +135,15 @@ class Parser
      */
     private function parseIfTag(array $token): IfNode
     {
-        // Extrair condition do atributo
-        preg_match('/condition\s*=\s*["\']?\{\{(.+?)\}\}["\']?/', $token['attributes'], $matches);
-        $condition = $matches[1] ?? '';
+        return new IfNode($this->extractAttributeValue($token['attributes'], 'condition'));
+    }
 
-        return new IfNode($condition);
+    /**
+     * Parse de tag ElseIf
+     */
+    private function parseElseIfTag(array $token): ElseIfNode
+    {
+        return new ElseIfNode($this->extractAttributeValue($token['attributes'], 'condition'));
     }
 
     /**
@@ -126,10 +154,7 @@ class Parser
      */
     private function parseBlockTag(array $token): BlockNode
     {
-        preg_match('/name\s*=\s*["\']([^"\']*)["\']/s', $token['attributes'], $matches);
-        $name = $matches[1] ?? '';
-
-        return new BlockNode($name);
+        return new BlockNode($this->extractAttributeValue($token['attributes'], 'name'));
     }
 
     /**
@@ -140,11 +165,8 @@ class Parser
      */
     private function parseForEachTag(array $token): ForeachNode
     {
-        preg_match('/items\s*=\s*\{\{(.+?)\}\}/', $token['attributes'], $itemsMatches);
-        preg_match('/as\s*=\s*["\']([^"\']*)["\']/s', $token['attributes'], $asMatches);
-
-        $items = $itemsMatches[1] ?? '';
-        $as = $asMatches[1] ?? '';
+        $items = $this->extractAttributeValue($token['attributes'], 'items');
+        $as = $this->extractAttributeValue($token['attributes'], 'as');
 
         return new ForeachNode($items, $as);
     }
@@ -172,15 +194,40 @@ class Parser
     private function parseAttributes(string $attributesStr): array
     {
         $attributes = [];
-        preg_match_all('/(\w+)\s*=\s*(?:\{\{(.+?)\}\}|["\']([^"\']*)["\']/s', $attributesStr, $matches, PREG_SET_ORDER);
+        if (trim($attributesStr) === '') {
+            return $attributes;
+        }
+
+        preg_match_all('/(\w+)\s*=\s*(?:\{\{\s*(.+?)\s*\}\}|["\']([^"\']*)["\'])/s', $attributesStr, $matches, PREG_SET_ORDER);
 
         foreach ($matches as $match) {
             $name = $match[1];
-            $value = $match[2] ?? $match[3] ?? '';
-            $attributes[$name] = $value;
+            $value = isset($match[2]) && $match[2] !== ''
+                ? trim($match[2])
+                : var_export($match[3] ?? '', true);
+            $attributes[$name] = trim($value);
         }
 
         return $attributes;
+    }
+
+    private function extractAttributeValue(string $attributes, string $name): string
+    {
+        $value = '';
+
+        if (preg_match('/' . preg_quote($name, '/') . '\s*=\s*\{\{\s*(.*?)\s*\}\}/s', $attributes, $matches) === 1) {
+            $value = trim($matches[1]);
+        } elseif (preg_match('/' . preg_quote($name, '/') . '\s*=\s*"([^"]*)"/s', $attributes, $matches) === 1) {
+            $value = trim($matches[1]);
+        } elseif (preg_match('/' . preg_quote($name, '/') . '\s*=\s*\'([^\']*)\'/s', $attributes, $matches) === 1) {
+            $value = trim($matches[1]);
+        }
+
+        if (preg_match('/^\{\{\s*(.*?)\s*\}\}$/s', $value, $dynamic) === 1) {
+            return trim($dynamic[1]);
+        }
+
+        return $value;
     }
 
     /**
@@ -217,5 +264,23 @@ class ForeachNode
     public function __construct(
         public string $items,
         public string $as
+    ) {}
+}
+
+class ElseNode
+{
+}
+
+class ElseIfNode
+{
+    public function __construct(
+        public string $condition
+    ) {}
+}
+
+class CloseTagNode
+{
+    public function __construct(
+        public string $name
     ) {}
 }

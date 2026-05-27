@@ -54,9 +54,9 @@ class FilterRegistry
     private function registerDefaultFilters(): void
     {
         // String filters
-        $this->register('uppercase', fn($v) => strtoupper($v));
-        $this->register('lowercase', fn($v) => strtolower($v));
-        $this->register('ucfirst', fn($v) => ucfirst($v));
+        $this->register('uppercase', fn($v) => function_exists('mb_strtoupper') ? mb_strtoupper((string) $v, 'UTF-8') : strtoupper((string) $v));
+        $this->register('lowercase', fn($v) => function_exists('mb_strtolower') ? mb_strtolower((string) $v, 'UTF-8') : strtolower((string) $v));
+        $this->register('ucfirst', fn($v) => ucfirst((string) $v));
         $this->register('reverse', fn($v) => strrev($v));
         $this->register('trim', fn($v) => trim($v));
         $this->register('ltrim', fn($v) => ltrim($v));
@@ -69,9 +69,9 @@ class FilterRegistry
 
         // Number filters
         $this->register('currency', fn($v, $currency = 'BRL') => 
-            $currency === 'BRL' ? 'R\$ ' . number_format($v, 2, ',', '.') : '$' . number_format($v, 2)
+            $currency === 'BRL' ? 'R$ ' . number_format((float) $v, 2, ',', '.') : '$' . number_format((float) $v, 2)
         );
-        $this->register('number_format', fn($v, $decimals = 0) => number_format($v, $decimals, ',', '.'));
+        $this->register('number_format', fn($v, $decimals = 0) => number_format((float) $v, (int) $decimals, ',', '.'));
         $this->register('abs', fn($v) => abs($v));
 
         // Date filter
@@ -80,11 +80,11 @@ class FilterRegistry
         );
 
         // Array filters
-        $this->register('count', fn($v) => count($v));
-        $this->register('first', fn($v) => $v[0] ?? null);
-        $this->register('last', fn($v) => end($v));
-        $this->register('reverse', fn($v) => array_reverse($v));
-        $this->register('join', fn($v, $sep = ',') => implode($sep, $v));
+        $this->register('count', fn($v) => is_countable($v) ? count($v) : 0);
+        $this->register('first', fn($v) => (is_array($v) || $v instanceof \Traversable) ? (is_array($v) ? reset($v) : (function () use ($v) { foreach ($v as $item) { return $item; } return null; })()) : null);
+        $this->register('last', fn($v) => (is_array($v) && !empty($v)) ? end($v) : null);
+        $this->register('reverse_array', fn($v) => is_array($v) ? array_reverse($v) : $v);
+        $this->register('join', fn($v, $sep = ',') => implode($sep, is_array($v) ? $v : (is_iterable($v) ? iterator_to_array($v) : [$v])));
 
         // JSON
         $this->register('json', fn($v) => json_encode($v, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));

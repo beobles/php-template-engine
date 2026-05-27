@@ -26,7 +26,7 @@ class Renderer
         try {
             eval('?>' . $compiledCode);
             return ob_get_clean();
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             ob_end_clean();
             throw $e;
         }

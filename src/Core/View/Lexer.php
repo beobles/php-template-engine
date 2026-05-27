@@ -31,15 +31,28 @@ class Lexer
 
         while ($pos < $length) {
             // Detectar keywords
-            if (strpos($content, 'extends', $pos) === $pos) {
+            if (preg_match('/^extends\b/', substr($content, $pos)) === 1) {
                 $tokens[] = ['type' => 'KEYWORD', 'value' => 'extends'];
                 $pos += 7;
                 continue;
             }
 
-            if (strpos($content, 'import', $pos) === $pos) {
+            if (preg_match('/^import\b/', substr($content, $pos)) === 1) {
                 $tokens[] = ['type' => 'KEYWORD', 'value' => 'import'];
                 $pos += 6;
+                continue;
+            }
+
+            // Detectar tag de fechamento
+            if ($content[$pos] === '<' && preg_match('/^<\/([A-Z][a-zA-Z0-9]*)\s*>/', substr($content, $pos), $matches)) {
+                $fullMatch = $matches[0];
+                $tokens[] = [
+                    'type' => 'TAG_CLOSE',
+                    'name' => $matches[1],
+                    'length' => strlen($fullMatch),
+                    'value' => $fullMatch
+                ];
+                $pos += strlen($fullMatch);
                 continue;
             }
 
@@ -74,6 +87,9 @@ class Lexer
                 if (in_array($content[$pos + $textLength], ['<', '{'])) {
                     // Verifica se é realmente um token
                     if (preg_match('/^<[A-Z]/', substr($content, $pos + $textLength))) {
+                        break;
+                    }
+                    if (preg_match('/^<\/[A-Z]/', substr($content, $pos + $textLength))) {
                         break;
                     }
                     if (strpos($content, '{{', $pos + $textLength) === $pos + $textLength ||

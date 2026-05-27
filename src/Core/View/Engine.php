@@ -15,6 +15,7 @@ use Beobles\Core\View\Filters\FilterRegistry;
  */
 class Engine
 {
+    private const CACHE_VERSION = '3';
     private string $templatesDir;
     private string $cacheDir;
     private bool $autoEscape;
@@ -52,7 +53,9 @@ class Engine
 
         // Criar cache dir se necessário
         if ($this->cacheEnabled && !is_dir($this->cacheDir)) {
-            mkdir($this->cacheDir, 0755, true);
+            if (!mkdir($this->cacheDir, 0755, true) && !is_dir($this->cacheDir)) {
+                throw new ViewException("Unable to create cache directory: {$this->cacheDir}");
+            }
         }
 
         // Inicializar componentes
@@ -85,7 +88,7 @@ class Engine
 
             // Verificar cache
             if ($this->cacheEnabled) {
-                $cacheKey = $this->generateCacheKey($templatePath);
+                $cacheKey = $this->generateCacheKey($absolutePath);
                 $cachedContent = $this->cacheManager->get($cacheKey);
 
                 if ($cachedContent !== null) {
@@ -95,6 +98,9 @@ class Engine
 
             // Ler template
             $content = file_get_contents($absolutePath);
+            if ($content === false) {
+                throw new ViewException("Unable to read template: {$templatePath}");
+            }
 
             // Tokenizar
             $tokens = $this->lexer->tokenize($content);
@@ -149,6 +155,11 @@ class Engine
      */
     public function resolveTemplatePath(string $path): string
     {
+        $path = ltrim($path, '/');
+        if (str_contains($path, '..')) {
+            throw new ViewException("Invalid template path: {$path}");
+        }
+
         // Resolver alias @components
         if (strpos($path, '@') === 0) {
             $path = str_replace('@components/', 'components/', $path);
@@ -159,7 +170,12 @@ class Engine
             $path .= '.html';
         }
 
-        return $this->templatesDir . '/' . $path;
+        $resolved = realpath($this->templatesDir . '/' . $path);
+        if ($resolved === false || strpos($resolved, realpath($this->templatesDir)) !== 0) {
+            return $this->templatesDir . '/' . $path;
+        }
+
+        return $resolved;
     }
 
     /**
@@ -168,9 +184,10 @@ class Engine
      * @param string $path Caminho do template
      * @return string Chave de cache
      */
-    private function generateCacheKey(string $path): string
+    private function generateCacheKey(string $absolutePath): string
     {
-        return 'template_' . md5($path);
+        $modifiedAt = file_exists($absolutePath) ? (string) filemtime($absolutePath) : '0';
+        return 'template_' . md5(self::CACHE_VERSION . '|' . $absolutePath . '|' . $modifiedAt);
     }
 
     /**
