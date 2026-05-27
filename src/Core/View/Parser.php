@@ -2,6 +2,7 @@
 
 namespace Core\View;
 
+use Core\View\Exceptions\ParserException;
 use Core\View\Nodes\BlockNode;
 use Core\View\Nodes\CloseTagNode;
 use Core\View\Nodes\ComponentNode;
@@ -20,6 +21,8 @@ class Parser
 {
     private array $tokens;
     private int $position = 0;
+    /** @var array<int, array{tag: string, hasElse: bool}> */
+    private array $controlStack = [];
 
     /**
      * @param  array $tokens Tokens produzidos pela Lexer
@@ -29,6 +32,7 @@ class Parser
     {
         $this->tokens = $tokens;
         $this->position = 0;
+        $this->controlStack = [];
         $nodes = [];
 
         while ($this->position < count($this->tokens)) {
@@ -48,6 +52,11 @@ class Parser
             }
 
             $this->advance();
+        }
+
+        if ($this->controlStack !== []) {
+            $openTags = implode(', ', array_map(static fn(array $entry): string => $entry['tag'], $this->controlStack));
+            throw new ParserException("Unclosed control tags: {$openTags}");
         }
 
         return $nodes;
@@ -76,16 +85,14 @@ class Parser
     {
         $token = $this->current();
         $tagName = $token['name'];
+        $isSelfClosing = (bool) ($token['self_closing'] ?? false);
 
         return match ($tagName) {
-            'If'        => new IfNode($this->extractAttributeValue($token['attributes'], 'condition')),
-            'ElseIf'    => new ElseIfNode($this->extractAttributeValue($token['attributes'], 'condition')),
-            'Else'      => new ElseNode(),
-            'Block'     => new BlockNode($this->extractAttributeValue($token['attributes'], 'name')),
-            'Foreach'   => new ForeachNode(
-                $this->extractAttributeValue($token['attributes'], 'items'),
-                $this->extractAttributeValue($token['attributes'], 'as')
-            ),
+            'If'        => $this->parseIfTag($token['attributes'], $isSelfClosing),
+            'ElseIf'    => $this->parseElseIfTag($token['attributes'], $isSelfClosing),
+            'Else'      => $this->parseElseTag($isSelfClosing),
+            'Block'     => $this->parseBlockTag($token['attributes'], $isSelfClosing),
+            'Foreach'   => $this->parseForeachTag($token['attributes'], $isSelfClosing),
             'Component' => $this->parseComponentTag($token),
             default     => preg_match('/^[A-Z]/', $tagName) === 1
                 ? $this->parseComponentTag($token)
@@ -96,11 +103,29 @@ class Parser
     private function parseCloseTag(): ?CloseTagNode
     {
         $token = $this->current();
+        $name = $token['name'] ?? '';
 
-        return match ($token['name']) {
-            'If', 'Foreach', 'Block' => new CloseTagNode($token['name']),
-            default                  => null,
-        };
+        if ($name === 'Else') {
+            $current = end($this->controlStack);
+            if ($current === false || $current['tag'] !== 'If' || !$current['hasElse']) {
+                throw new ParserException('Unexpected closing tag </Else> without an active <Else> block');
+            }
+            return null;
+        }
+
+        if (!in_array($name, ['If', 'Foreach', 'Block'], true)) {
+            throw new ParserException("Unexpected closing tag </{$name}>");
+        }
+
+        $current = end($this->controlStack);
+        if ($current === false || $current['tag'] !== $name) {
+            $openTag = $current['tag'] ?? 'none';
+            throw new ParserException("Mismatched closing tag </{$name}>. Current open tag: {$openTag}");
+        }
+
+        array_pop($this->controlStack);
+
+        return new CloseTagNode($name);
     }
 
     private function parseKeyword(): null
@@ -115,7 +140,109 @@ class Parser
 
     private function parseComponentTag(array $token): ComponentNode
     {
+        if (!(bool) ($token['self_closing'] ?? false)) {
+            throw new ParserException(
+                "Component tag <{$token['name']}> must be self-closing (use <{$token['name']} ... />)"
+            );
+        }
+
         return new ComponentNode($token['name'], $this->parseAttributes($token['attributes']));
+    }
+
+    private function parseIfTag(string $attributes, bool $isSelfClosing): IfNode
+    {
+        if ($isSelfClosing) {
+            throw new ParserException('<If> cannot be self-closing');
+        }
+
+        $condition = $this->extractAttributeValue($attributes, 'condition');
+        if ($condition === '') {
+            throw new ParserException('<If> requires a non-empty condition attribute');
+        }
+
+        $this->controlStack[] = ['tag' => 'If', 'hasElse' => false];
+
+        return new IfNode($condition);
+    }
+
+    private function parseElseIfTag(string $attributes, bool $isSelfClosing): ElseIfNode
+    {
+        if ($isSelfClosing) {
+            throw new ParserException('<ElseIf> cannot be self-closing');
+        }
+
+        $current = end($this->controlStack);
+        if ($current === false || $current['tag'] !== 'If') {
+            throw new ParserException('<ElseIf> must be inside an <If> block');
+        }
+
+        if ($current['hasElse']) {
+            throw new ParserException('<ElseIf> cannot appear after <Else> in the same <If> block');
+        }
+
+        $condition = $this->extractAttributeValue($attributes, 'condition');
+        if ($condition === '') {
+            throw new ParserException('<ElseIf> requires a non-empty condition attribute');
+        }
+
+        return new ElseIfNode($condition);
+    }
+
+    private function parseElseTag(bool $isSelfClosing): ElseNode
+    {
+        if ($isSelfClosing) {
+            throw new ParserException('<Else> cannot be self-closing');
+        }
+
+        $stackIndex = array_key_last($this->controlStack);
+        if ($stackIndex === null || $this->controlStack[$stackIndex]['tag'] !== 'If') {
+            throw new ParserException('<Else> must be inside an <If> block');
+        }
+
+        if ($this->controlStack[$stackIndex]['hasElse']) {
+            throw new ParserException('Only one <Else> is allowed per <If> block');
+        }
+
+        $this->controlStack[$stackIndex]['hasElse'] = true;
+
+        return new ElseNode();
+    }
+
+    private function parseBlockTag(string $attributes, bool $isSelfClosing): BlockNode
+    {
+        if ($isSelfClosing) {
+            throw new ParserException('<Block> cannot be self-closing');
+        }
+
+        $name = $this->extractAttributeValue($attributes, 'name');
+        if ($name === '') {
+            throw new ParserException('<Block> requires a non-empty name attribute');
+        }
+
+        $this->controlStack[] = ['tag' => 'Block', 'hasElse' => false];
+
+        return new BlockNode($name);
+    }
+
+    private function parseForeachTag(string $attributes, bool $isSelfClosing): ForeachNode
+    {
+        if ($isSelfClosing) {
+            throw new ParserException('<Foreach> cannot be self-closing');
+        }
+
+        $items = $this->extractAttributeValue($attributes, 'items');
+        $as = $this->extractAttributeValue($attributes, 'as');
+
+        if ($items === '') {
+            throw new ParserException('<Foreach> requires a non-empty items attribute');
+        }
+        if ($as === '') {
+            throw new ParserException('<Foreach> requires a non-empty as attribute');
+        }
+
+        $this->controlStack[] = ['tag' => 'Foreach', 'hasElse' => false];
+
+        return new ForeachNode($items, $as);
     }
 
     // -------------------------------------------------------------------------
@@ -194,4 +321,3 @@ class Parser
         $this->position++;
     }
 }
-

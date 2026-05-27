@@ -30,19 +30,20 @@ class Lexer
         $pos = 0;
 
         while ($pos < $length) {
-            // Detectar diretivas por keyword (ex.: extends "base.html";)
-            if (preg_match('/^(extends|import)\b\s*[^;]*;/', substr($content, $pos), $matches) === 1) {
-                $tokens[] = [
-                    'type' => self::TOKEN_KEYWORD,
-                    'value' => trim($matches[0]),
-                    'length' => strlen($matches[0]),
-                ];
-                $pos += strlen($matches[0]);
-                continue;
+            $slice = substr($content, $pos);
+
+            // Detectar diretivas por keyword apenas no início da linha.
+            if ($this->isDirectiveLineStart($content, $pos)) {
+                $directive = $this->extractKeywordDirective($content, $pos);
+                if ($directive !== null) {
+                    $tokens[] = $directive;
+                    $pos += $directive['length'];
+                    continue;
+                }
             }
 
             // Detectar tag de fechamento
-            if ($content[$pos] === '<' && preg_match('/^<\/([A-Z][a-zA-Z0-9]*)\s*>/', substr($content, $pos), $matches)) {
+            if ($content[$pos] === '<' && preg_match('/^<\/([A-Z][a-zA-Z0-9]*)\s*>/', $slice, $matches)) {
                 $fullMatch = $matches[0];
                 $tokens[] = [
                     'type' => 'TAG_CLOSE',
@@ -55,7 +56,7 @@ class Lexer
             }
 
             // Detectar tag de abertura
-            if ($content[$pos] === '<' && preg_match('/^<([A-Z][a-zA-Z0-9]*)/', substr($content, $pos), $matches)) {
+            if ($content[$pos] === '<' && preg_match('/^<([A-Z][a-zA-Z0-9]*)/', $slice, $matches)) {
                 // Isso é uma tag customizada
                 $token = $this->extractTag($content, $pos);
                 $tokens[] = $token;
@@ -82,16 +83,24 @@ class Lexer
             // Texto normal
             $textLength = 0;
             while ($pos + $textLength < $length) {
-                if (in_array($content[$pos + $textLength], ['<', '{'])) {
-                    // Verifica se é realmente um token
-                    if (preg_match('/^<[A-Z]/', substr($content, $pos + $textLength))) {
+                $cursor = $pos + $textLength;
+                $char = $content[$cursor];
+
+                if ($char === '<') {
+                    $next = $content[$cursor + 1] ?? '';
+                    $next2 = $content[$cursor + 2] ?? '';
+
+                    if ($next !== '' && ctype_upper($next)) {
                         break;
                     }
-                    if (preg_match('/^<\/[A-Z]/', substr($content, $pos + $textLength))) {
+                    if ($next === '/' && $next2 !== '' && ctype_upper($next2)) {
                         break;
                     }
-                    if (strpos($content, '{{', $pos + $textLength) === $pos + $textLength ||
-                        strpos($content, '{!', $pos + $textLength) === $pos + $textLength) {
+                }
+
+                if ($char === '{') {
+                    $next = $content[$cursor + 1] ?? '';
+                    if ($next === '{' || $next === '!') {
                         break;
                     }
                 }
@@ -109,6 +118,72 @@ class Lexer
         }
 
         return $tokens;
+    }
+
+    private function isDirectiveLineStart(string $content, int $pos): bool
+    {
+        for ($i = $pos - 1; $i >= 0; $i--) {
+            $char = $content[$i];
+            if ($char === "\n" || $char === "\r") {
+                return true;
+            }
+            if ($char !== ' ' && $char !== "\t") {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function extractKeywordDirective(string $content, int $pos): ?array
+    {
+        $length = strlen($content);
+        $cursor = $pos;
+        while ($cursor < $length && ($content[$cursor] === ' ' || $content[$cursor] === "\t")) {
+            $cursor++;
+        }
+
+        if (preg_match('/\G(extends|import)\b/A', $content, $m, 0, $cursor) !== 1) {
+            return null;
+        }
+
+        $cursor += strlen($m[1]);
+        $quote = null;
+
+        while ($cursor < $length) {
+            $char = $content[$cursor];
+
+            if ($quote !== null) {
+                if ($char === $quote && ($cursor === 0 || $content[$cursor - 1] !== '\\')) {
+                    $quote = null;
+                }
+                $cursor++;
+                continue;
+            }
+
+            if ($char === '"' || $char === "'") {
+                $quote = $char;
+                $cursor++;
+                continue;
+            }
+
+            if ($char === ';') {
+                $directive = substr($content, $pos, ($cursor - $pos) + 1);
+                return [
+                    'type' => self::TOKEN_KEYWORD,
+                    'value' => trim($directive),
+                    'length' => strlen($directive),
+                ];
+            }
+
+            if ($char === "\n" || $char === "\r") {
+                return null;
+            }
+
+            $cursor++;
+        }
+
+        throw new SyntaxException("Unclosed keyword directive at position $pos");
     }
 
     /**
