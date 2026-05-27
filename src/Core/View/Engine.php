@@ -29,6 +29,7 @@ class Engine
     private CacheManager $cacheManager;
     private ComponentRegistry $componentRegistry;
     private FilterRegistry $filterRegistry;
+    private string $compiledTemplatesDir;
 
     /**
      * Construtor do Engine
@@ -36,6 +37,7 @@ class Engine
      * @param array $config [
      *   'templates_dir' => string,
      *   'cache_dir' => string,
+     *   'compiled_templates_dir' => string,
      *   'auto_escape' => bool,
      *   'cache_enabled' => bool,
      * ]
@@ -46,6 +48,7 @@ class Engine
         $this->cacheDir = $config['cache_dir'] ?? __DIR__ . '/../../../cache';
         $this->autoEscape = $config['auto_escape'] ?? true;
         $this->cacheEnabled = $config['cache_enabled'] ?? true;
+        $this->compiledTemplatesDir = ($config['compiled_templates_dir'] ?? ($this->cacheDir . '/compiled'));
 
         // Validar diretórios
         if (!is_dir($this->templatesDir)) {
@@ -64,7 +67,7 @@ class Engine
         $this->lexer = new Lexer();
         $this->parser = new Parser();
         $this->compiler = new Compiler();
-        $this->renderer = new Renderer();
+        $this->renderer = new Renderer($this->compiledTemplatesDir);
         $this->cacheManager = new CacheManager(new FileCacheAdapter($this->cacheDir));
         $this->componentRegistry = new ComponentRegistry();
         $this->filterRegistry = new FilterRegistry();
