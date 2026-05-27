@@ -83,25 +83,19 @@ class Renderer
             return;
         }
 
-        $command = escapeshellarg(PHP_BINARY) . ' -n -l ' . escapeshellarg($templateFile);
-        $descriptors = [
-            1 => ['pipe', 'w'],
-            2 => ['pipe', 'w'],
-        ];
-
-        $process = proc_open($command, $descriptors, $pipes);
-        if (!is_resource($process)) {
-            throw new SyntaxException("Unable to validate template syntax for '{$templateFile}'.");
+        $lintResult = $this->runCliSyntaxLint($templateFile);
+        if ($lintResult === null) {
+            $this->validatedTemplates[$templateFile] = true;
+            return;
         }
 
-        $stdout = stream_get_contents($pipes[1]) ?: '';
-        fclose($pipes[1]);
-        $stderr = stream_get_contents($pipes[2]) ?: '';
-        fclose($pipes[2]);
-        $exitCode = proc_close($process);
-        $output = trim($stderr !== '' ? $stderr : $stdout);
-
+        [$exitCode, $output] = $lintResult;
         if ($exitCode === 0) {
+            $this->validatedTemplates[$templateFile] = true;
+            return;
+        }
+
+        if (!$this->isSyntaxLintOutput($output)) {
             $this->validatedTemplates[$templateFile] = true;
             return;
         }
@@ -113,6 +107,79 @@ class Renderer
             ($snippet !== '' ? " Snippet: {$snippet}" : '') .
             ($output !== '' ? " PHP lint: {$output}" : '')
         );
+    }
+
+    /**
+     * @return array{0:int,1:string}|null
+     */
+    private function runCliSyntaxLint(string $templateFile): ?array
+    {
+        $phpBinary = $this->resolvePhpBinaryForLint();
+        if ($phpBinary === null) {
+            return null;
+        }
+
+        $descriptors = [
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+
+        $process = @proc_open([$phpBinary, '-n', '-l', $templateFile], $descriptors, $pipes);
+        if (!is_resource($process)) {
+            return null;
+        }
+
+        $stdout = stream_get_contents($pipes[1]) ?: '';
+        fclose($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]) ?: '';
+        fclose($pipes[2]);
+        $exitCode = proc_close($process);
+        $output = trim($stderr !== '' ? $stderr : $stdout);
+
+        return [$exitCode, $output];
+    }
+
+    private function resolvePhpBinaryForLint(): ?string
+    {
+        $candidates = [];
+        $candidates[] = PHP_BINARY;
+
+        $bindir = defined('PHP_BINDIR') ? PHP_BINDIR : '';
+        if ($bindir !== '') {
+            $candidates[] = rtrim($bindir, '/\\') . DIRECTORY_SEPARATOR . 'php';
+            $candidates[] = rtrim($bindir, '/\\') . DIRECTORY_SEPARATOR . 'php.exe';
+        }
+
+        $candidates[] = 'php';
+        $candidates[] = 'php.exe';
+
+        foreach ($candidates as $candidate) {
+            if (!$this->looksLikePhpBinary($candidate)) {
+                continue;
+            }
+
+            if (str_contains($candidate, DIRECTORY_SEPARATOR) || str_contains($candidate, '/') || str_contains($candidate, '\\')) {
+                if (!is_file($candidate)) {
+                    continue;
+                }
+                return $candidate;
+            }
+
+            return $candidate;
+        }
+
+        return null;
+    }
+
+    private function looksLikePhpBinary(string $binary): bool
+    {
+        $name = basename(str_replace('\\', '/', $binary));
+        return preg_match('/^php(?:-cgi|-dbg)?(?:\.exe)?$/i', $name) === 1;
+    }
+
+    private function isSyntaxLintOutput(string $output): bool
+    {
+        return preg_match('/(parse error|syntax error|errors parsing|unexpected\s+\S+)/i', $output) === 1;
     }
 
     /**
