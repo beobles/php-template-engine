@@ -1,6 +1,6 @@
 <?php
 
-namespace Beobles\Core\View;
+namespace Core\View;
 
 /**
  * Renderizador de templates compilados

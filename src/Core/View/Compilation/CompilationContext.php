@@ -1,6 +1,6 @@
 <?php
 
-namespace Beobles\Core\View\Compilation;
+namespace Core\View\Compilation;
 
 /**
  * Buffer de compilação passado a cada Node durante a compilação.

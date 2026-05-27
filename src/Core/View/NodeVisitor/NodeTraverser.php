@@ -1,8 +1,8 @@
 <?php
 
-namespace Beobles\Core\View\NodeVisitor;
+namespace Core\View\NodeVisitor;
 
-use Beobles\Core\View\Nodes\NodeInterface;
+use Core\View\Nodes\NodeInterface;
 
 /**
  * Percorre a lista de nós da AST chamando cada visitante registrado.

@@ -1,8 +1,8 @@
 <?php
 
-namespace Beobles\Core\View\Nodes;
+namespace Core\View\Nodes;
 
-use Beobles\Core\View\Compilation\CompilationContext;
+use Core\View\Compilation\CompilationContext;
 
 /**
  * Contrato para todos os nós da AST.

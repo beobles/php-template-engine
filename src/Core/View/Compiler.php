@@ -1,12 +1,12 @@
 <?php
 
-namespace Beobles\Core\View;
+namespace Core\View;
 
-use Beobles\Core\View\Compilation\CompilationContext;
-use Beobles\Core\View\Compilation\ExpressionCompiler;
-use Beobles\Core\View\NodeVisitor\NodeTraverser;
-use Beobles\Core\View\NodeVisitor\NodeVisitorInterface;
-use Beobles\Core\View\Nodes\NodeInterface;
+use Core\View\Compilation\CompilationContext;
+use Core\View\Compilation\ExpressionCompiler;
+use Core\View\NodeVisitor\NodeTraverser;
+use Core\View\NodeVisitor\NodeVisitorInterface;
+use Core\View\Nodes\NodeInterface;
 
 /**
  * Orquestrador da compilação de templates.

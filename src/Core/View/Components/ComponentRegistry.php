@@ -1,8 +1,8 @@
 <?php
 
-namespace Beobles\Core\View\Components;
+namespace Core\View\Components;
 
-use Beobles\Core\View\Exceptions\ViewException;
+use Core\View\Exceptions\ViewException;
 
 /**
  * Registro de componentes

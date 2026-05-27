@@ -1,6 +1,6 @@
 <?php
 
-namespace Beobles\Core\View\Compilation;
+namespace Core\View\Compilation;
 
 /**
  * Compila expressões do template para código PHP válido.

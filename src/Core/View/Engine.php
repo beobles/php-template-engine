@@ -1,13 +1,13 @@
 <?php
 
-namespace Beobles\Core\View;
+namespace Core\View;
 
-use Beobles\Core\View\Cache\CacheManager;
-use Beobles\Core\View\Cache\FileCacheAdapter;
-use Beobles\Core\View\Components\ComponentRegistry;
-use Beobles\Core\View\Exceptions\ViewException;
-use Beobles\Core\View\Filters\FilterRegistry;
-use Beobles\Core\View\NodeVisitor\NodeVisitorInterface;
+use Core\View\Cache\CacheManager;
+use Core\View\Cache\FileCacheAdapter;
+use Core\View\Components\ComponentRegistry;
+use Core\View\Exceptions\ViewException;
+use Core\View\Filters\FilterRegistry;
+use Core\View\NodeVisitor\NodeVisitorInterface;
 
 /**
  * Motor de Template Engine Principal

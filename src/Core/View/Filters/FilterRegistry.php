@@ -1,8 +1,8 @@
 <?php
 
-namespace Beobles\Core\View\Filters;
+namespace Core\View\Filters;
 
-use Beobles\Core\View\Exceptions\ViewException;
+use Core\View\Exceptions\ViewException;
 
 /**
  * Registro de filtros

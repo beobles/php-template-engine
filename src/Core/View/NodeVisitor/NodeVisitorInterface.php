@@ -1,8 +1,8 @@
 <?php
 
-namespace Beobles\Core\View\NodeVisitor;
+namespace Core\View\NodeVisitor;
 
-use Beobles\Core\View\Nodes\NodeInterface;
+use Core\View\Nodes\NodeInterface;
 
 /**
  * Contrato para visitantes de nós da AST.

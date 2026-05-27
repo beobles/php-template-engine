@@ -1,17 +1,17 @@
 <?php
 
-namespace Beobles\Core\View;
+namespace Core\View;
 
-use Beobles\Core\View\Nodes\BlockNode;
-use Beobles\Core\View\Nodes\CloseTagNode;
-use Beobles\Core\View\Nodes\ComponentNode;
-use Beobles\Core\View\Nodes\ElseIfNode;
-use Beobles\Core\View\Nodes\ElseNode;
-use Beobles\Core\View\Nodes\ExpressionNode;
-use Beobles\Core\View\Nodes\ForeachNode;
-use Beobles\Core\View\Nodes\IfNode;
-use Beobles\Core\View\Nodes\RawNode;
-use Beobles\Core\View\Nodes\TextNode;
+use Core\View\Nodes\BlockNode;
+use Core\View\Nodes\CloseTagNode;
+use Core\View\Nodes\ComponentNode;
+use Core\View\Nodes\ElseIfNode;
+use Core\View\Nodes\ElseNode;
+use Core\View\Nodes\ExpressionNode;
+use Core\View\Nodes\ForeachNode;
+use Core\View\Nodes\IfNode;
+use Core\View\Nodes\RawNode;
+use Core\View\Nodes\TextNode;
 
 /**
  * Converte tokens em nós (AST plana) para compilação posterior.
@@ -23,7 +23,7 @@ class Parser
 
     /**
      * @param  array $tokens Tokens produzidos pela Lexer
-     * @return array<\Beobles\Core\View\Nodes\NodeInterface>
+     * @return array<\Core\View\Nodes\NodeInterface>
      */
     public function parse(array $tokens): array
     {
@@ -72,7 +72,7 @@ class Parser
         return new RawNode($this->current()['value']);
     }
 
-    private function parseTag(): ?\Beobles\Core\View\Nodes\NodeInterface
+    private function parseTag(): ?\Core\View\Nodes\NodeInterface
     {
         $token = $this->current();
         $tagName = $token['name'];
