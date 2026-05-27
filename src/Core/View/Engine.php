@@ -16,7 +16,7 @@ use Core\View\NodeVisitor\NodeVisitorInterface;
  */
 class Engine
 {
-    private const CACHE_VERSION = '5';
+    private const CACHE_VERSION = '6';
     private string $templatesDir;
     private string $cacheDir;
     private bool $autoEscape;
@@ -87,9 +87,11 @@ class Engine
                 throw new ViewException("Template not found: {$templatePath}");
             }
 
+            $dependencies = $this->collectTemplateDependencies($absolutePath, [$absolutePath]);
+
             // Verificar cache
             if ($this->cacheEnabled) {
-                $cacheKey = $this->generateCacheKey($absolutePath);
+                $cacheKey = $this->generateCacheKey($dependencies);
                 $cachedContent = $this->cacheManager->get($cacheKey);
 
                 if ($cachedContent !== null) {
@@ -104,7 +106,7 @@ class Engine
             }
 
             // Resolver herança de templates (extends + blocks)
-            $content = $this->resolveTemplateInheritance($content, $absolutePath, [$absolutePath]);
+            $content = $this->resolveTemplateInheritance($content, [$absolutePath]);
 
             // Tokenizar
             $tokens = $this->lexer->tokenize($content);
@@ -196,10 +198,49 @@ class Engine
      * @param string $path Caminho do template
      * @return string Chave de cache
      */
-    private function generateCacheKey(string $absolutePath): string
+    private function generateCacheKey(array $dependencies): string
     {
-        $modifiedAt = file_exists($absolutePath) ? (string) filemtime($absolutePath) : '0';
-        return 'template_' . md5(self::CACHE_VERSION . '|' . $absolutePath . '|' . $modifiedAt);
+        $signature = [];
+
+        foreach ($dependencies as $path) {
+            $modifiedAt = file_exists($path) ? (string) filemtime($path) : '0';
+            $signature[] = $path . '@' . $modifiedAt;
+        }
+
+        return 'template_' . md5(self::CACHE_VERSION . '|' . implode('|', $signature));
+    }
+
+    /**
+     * Coleta cadeia completa de templates envolvidos em extends.
+     *
+     * @param string[] $stack
+     * @return string[]
+     */
+    private function collectTemplateDependencies(string $absolutePath, array $stack): array
+    {
+        $content = file_get_contents($absolutePath);
+        if ($content === false) {
+            throw new ViewException("Unable to read template dependency: {$absolutePath}");
+        }
+
+        $parentRelativePath = $this->extractParentTemplatePath($content);
+        if ($parentRelativePath === null) {
+            return [$absolutePath];
+        }
+
+        $parentAbsolutePath = $this->resolveTemplatePath($parentRelativePath);
+        if (!file_exists($parentAbsolutePath)) {
+            throw new ViewException("Parent template not found: {$parentRelativePath}");
+        }
+
+        if (in_array($parentAbsolutePath, $stack, true)) {
+            throw new ViewException("Circular extends detected: {$parentRelativePath}");
+        }
+
+        return array_merge(
+            [$absolutePath],
+            $this->collectTemplateDependencies($parentAbsolutePath, [...$stack, $parentAbsolutePath])
+        );
     }
 
     /**
@@ -207,13 +248,12 @@ class Engine
      *
      * @param string[] $stack
      */
-    private function resolveTemplateInheritance(string $content, string $currentPath, array $stack): string
+    private function resolveTemplateInheritance(string $content, array $stack): string
     {
-        if (preg_match('/^\s*extends\s+["\']([^"\']+)["\']\s*;/i', $content, $match) !== 1) {
+        $parentRelativePath = $this->extractParentTemplatePath($content);
+        if ($parentRelativePath === null) {
             return $content;
         }
-
-        $parentRelativePath = trim($match[1]);
         $parentAbsolutePath = $this->resolveTemplatePath($parentRelativePath);
 
         if (!file_exists($parentAbsolutePath)) {
@@ -230,9 +270,18 @@ class Engine
         }
 
         $childContent = preg_replace('/^\s*extends\s+["\']([^"\']+)["\']\s*;[ \t]*\R?/i', '', $content, 1) ?? $content;
-        $parentResolved = $this->resolveTemplateInheritance($parentContent, $parentAbsolutePath, [...$stack, $parentAbsolutePath]);
+        $parentResolved = $this->resolveTemplateInheritance($parentContent, [...$stack, $parentAbsolutePath]);
 
         return $this->mergeBlocks($parentResolved, $childContent);
+    }
+
+    private function extractParentTemplatePath(string $content): ?string
+    {
+        if (preg_match('/^\s*extends\s+["\']([^"\']+)["\']\s*;/i', $content, $match) !== 1) {
+            return null;
+        }
+
+        return trim($match[1]);
     }
 
     /**
