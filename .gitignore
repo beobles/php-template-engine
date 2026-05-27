@@ -1,0 +1,19 @@
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Cache
+cache/
+*.tmp
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
