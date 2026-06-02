@@ -6,6 +6,7 @@ use Core\View\Cache\CacheManager;
 use Core\View\Cache\FileCacheAdapter;
 use Core\View\Components\ComponentRegistry;
 use Core\View\Exceptions\ViewException;
+use Core\View\Exceptions\ParserException;
 use Core\View\Filters\FilterRegistry;
 use Core\View\NodeVisitor\NodeVisitorInterface;
 
@@ -115,10 +116,14 @@ class Engine
 
     private function compileTemplate(string $absolutePath, string $templatePath): string
     {
-        $content = $this->readTemplateFile($absolutePath, $templatePath);
-        $content = $this->resolveTemplateInheritance($content, [$absolutePath]);
-        $tokens = $this->lexer->tokenize($content);
-        $ast = $this->parser->parse($tokens);
+        $resolvedTemplate = $this->resolveTemplateInheritanceWithSource($absolutePath, [$absolutePath]);
+        $tokens = $this->lexer->tokenize($resolvedTemplate['content'], $resolvedTemplate['char_map']);
+
+        try {
+            $ast = $this->parser->parse($tokens);
+        } catch (ParserException $e) {
+            throw $this->augmentParserExceptionWithTemplate($e, $templatePath);
+        }
 
         return $this->compiler->compile($ast);
     }
@@ -268,11 +273,15 @@ class Engine
 
         $parentAbsolutePath = $this->resolveTemplatePath($parentRelativePath);
         if (!file_exists($parentAbsolutePath)) {
-            throw new ViewException("Parent template not found: {$parentRelativePath}");
+            throw new ViewException(
+                "Parent template not found: '{$parentRelativePath}' referenced from '{$absolutePath}'"
+            );
         }
 
         if (in_array($parentAbsolutePath, $stack, true)) {
-            throw new ViewException("Circular extends detected: {$parentRelativePath}");
+            throw new ViewException(
+                "Circular extends detected. '{$absolutePath}' references '{$parentRelativePath}' recursively"
+            );
         }
 
         return array_merge(
@@ -285,32 +294,46 @@ class Engine
      * Resolve herança de template via `extends "path";` e sobrescrita de <Block>.
      *
      * @param string[] $stack
+     * @return array{content: string, char_map: array<int, array{file: string, line: int, column: int}>}
      */
-    private function resolveTemplateInheritance(string $content, array $stack): string
+    private function resolveTemplateInheritanceWithSource(string $absolutePath, array $stack): array
     {
+        $content = $this->readTemplateFile($absolutePath, $absolutePath);
         $parentRelativePath = $this->extractParentTemplatePath($content);
-        if ($parentRelativePath === null) {
-            return $content;
-        }
-        $parentAbsolutePath = $this->resolveTemplatePath($parentRelativePath);
 
+        if ($parentRelativePath === null) {
+            return [
+                'content' => $content,
+                'char_map' => $this->buildCharMap($content, $absolutePath),
+            ];
+        }
+
+        $parentAbsolutePath = $this->resolveTemplatePath($parentRelativePath);
         if (!file_exists($parentAbsolutePath)) {
-            throw new ViewException("Parent template not found: {$parentRelativePath}");
+            throw new ViewException(
+                "Parent template not found: '{$parentRelativePath}' referenced from '{$absolutePath}'"
+            );
         }
 
         if (in_array($parentAbsolutePath, $stack, true)) {
-            throw new ViewException("Circular extends detected: {$parentRelativePath}");
+            throw new ViewException(
+                "Circular extends detected. '{$absolutePath}' references '{$parentRelativePath}' recursively"
+            );
         }
 
-        $parentContent = file_get_contents($parentAbsolutePath);
-        if ($parentContent === false) {
-            throw new ViewException("Unable to read parent template: {$parentRelativePath}");
-        }
+        $parentResolved = $this->resolveTemplateInheritanceWithSource($parentAbsolutePath, [...$stack, $parentAbsolutePath]);
+        $childWithoutExtends = $this->removeExtendsDirective($content);
+        $childResolved = [
+            'content' => $childWithoutExtends['content'],
+            'char_map' => $this->buildCharMap(
+                $childWithoutExtends['content'],
+                $absolutePath,
+                $childWithoutExtends['line'],
+                $childWithoutExtends['column']
+            ),
+        ];
 
-        $childContent = preg_replace('/^\s*extends\s+["\']([^"\']+)["\']\s*;[ \t]*\R?/i', '', $content, 1) ?? $content;
-        $parentResolved = $this->resolveTemplateInheritance($parentContent, [...$stack, $parentAbsolutePath]);
-
-        return $this->mergeBlocks($parentResolved, $childContent);
+        return $this->mergeBlocksWithSource($parentResolved, $childResolved);
     }
 
     private function extractParentTemplatePath(string $content): ?string
@@ -323,31 +346,181 @@ class Engine
     }
 
     /**
-     * @return array<string,string>
+     * @param array{content: string, char_map: array<int, array{file: string, line: int, column: int}>} $parentResolved
+     * @param array{content: string, char_map: array<int, array{file: string, line: int, column: int}>} $childResolved
+     * @return array{content: string, char_map: array<int, array{file: string, line: int, column: int}>}
      */
-    private function extractBlocks(string $content): array
+    private function mergeBlocksWithSource(array $parentResolved, array $childResolved): array
     {
-        $blocks = [];
-        preg_match_all('/<Block\s+name\s*=\s*["\']([^"\']+)["\']\s*>(.*?)<\/Block>/is', $content, $matches, PREG_SET_ORDER);
+        $pattern = '/<Block\s+name\s*=\s*["\']([^"\']+)["\']\s*>(.*?)<\/Block>/is';
+        $childBlocks = $this->extractBlocksWithSource($childResolved, $pattern);
+
+        preg_match_all($pattern, $parentResolved['content'], $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE);
+
+        if ($matches === []) {
+            return $parentResolved;
+        }
+
+        $mergedContent = '';
+        $mergedMap = [];
+        $cursor = 0;
 
         foreach ($matches as $match) {
-            $blocks[$match[1]] = $match[2];
+            $fullMatch = (string) $match[0][0];
+            $matchOffset = (int) $match[0][1];
+            $matchLength = strlen($fullMatch);
+            $blockName = (string) $match[1][0];
+            $innerContent = (string) $match[2][0];
+            $innerOffset = (int) $match[2][1];
+
+            $prefix = $this->sliceResolvedSegment($parentResolved, $cursor, $matchOffset - $cursor);
+            $mergedContent .= $prefix['content'];
+            if ($prefix['char_map'] !== []) {
+                $mergedMap = array_merge($mergedMap, $prefix['char_map']);
+            }
+
+            if (isset($childBlocks[$blockName])) {
+                $replacement = $childBlocks[$blockName];
+            } else {
+                $replacement = $this->sliceResolvedSegment($parentResolved, $innerOffset, strlen($innerContent));
+            }
+
+            $mergedContent .= $replacement['content'];
+            if ($replacement['char_map'] !== []) {
+                $mergedMap = array_merge($mergedMap, $replacement['char_map']);
+            }
+
+            $cursor = $matchOffset + $matchLength;
+        }
+
+        $suffix = $this->sliceResolvedSegment($parentResolved, $cursor, strlen($parentResolved['content']) - $cursor);
+        $mergedContent .= $suffix['content'];
+        if ($suffix['char_map'] !== []) {
+            $mergedMap = array_merge($mergedMap, $suffix['char_map']);
+        }
+
+        return [
+            'content' => $mergedContent,
+            'char_map' => $mergedMap,
+        ];
+    }
+
+    /**
+     * @param array{content: string, char_map: array<int, array{file: string, line: int, column: int}>} $resolved
+     * @return array<string, array{content: string, char_map: array<int, array{file: string, line: int, column: int}>}>
+     */
+    private function extractBlocksWithSource(array $resolved, string $pattern): array
+    {
+        $blocks = [];
+        preg_match_all($pattern, $resolved['content'], $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE);
+
+        foreach ($matches as $match) {
+            $name = (string) $match[1][0];
+            $innerContent = (string) $match[2][0];
+            $innerOffset = (int) $match[2][1];
+            $blocks[$name] = $this->sliceResolvedSegment($resolved, $innerOffset, strlen($innerContent));
         }
 
         return $blocks;
     }
 
-    private function mergeBlocks(string $parentContent, string $childContent): string
+    /**
+     * @param array{content: string, char_map: array<int, array{file: string, line: int, column: int}>} $resolved
+     * @return array{content: string, char_map: array<int, array{file: string, line: int, column: int}>}
+     */
+    private function sliceResolvedSegment(array $resolved, int $start, int $length): array
     {
-        $childBlocks = $this->extractBlocks($childContent);
+        if ($length <= 0) {
+            return ['content' => '', 'char_map' => []];
+        }
 
-        return (string) preg_replace_callback(
-            '/<Block\s+name\s*=\s*["\']([^"\']+)["\']\s*>(.*?)<\/Block>/is',
-            static function (array $match) use ($childBlocks): string {
-                $name = $match[1];
-                return $childBlocks[$name] ?? $match[2];
-            },
-            $parentContent
+        return [
+            'content' => substr($resolved['content'], $start, $length),
+            'char_map' => array_slice($resolved['char_map'], $start, $length),
+        ];
+    }
+
+    /**
+     * @return array{content: string, line: int, column: int}
+     */
+    private function removeExtendsDirective(string $content): array
+    {
+        if (preg_match('/^\s*extends\s+["\']([^"\']+)["\']\s*;[ \t]*\R?/i', $content, $match) !== 1) {
+            return ['content' => $content, 'line' => 1, 'column' => 1];
+        }
+
+        $removed = $match[0];
+        $withoutExtends = substr($content, strlen($removed));
+        [$line, $column] = $this->advanceCursorByText($removed, 1, 1);
+
+        return [
+            'content' => $withoutExtends,
+            'line' => $line,
+            'column' => $column,
+        ];
+    }
+
+    /**
+     * @return array<int, array{file: string, line: int, column: int}>
+     */
+    private function buildCharMap(string $content, string $file, int $startLine = 1, int $startColumn = 1): array
+    {
+        $line = $startLine;
+        $column = $startColumn;
+        $map = [];
+        $length = strlen($content);
+
+        for ($i = 0; $i < $length; $i++) {
+            $char = $content[$i];
+            $map[$i] = [
+                'file' => $file,
+                'line' => $line,
+                'column' => $column,
+            ];
+
+            if ($char === "\n") {
+                $line++;
+                $column = 1;
+                continue;
+            }
+
+            $column++;
+        }
+
+        return $map;
+    }
+
+    /**
+     * @return array{0:int,1:int}
+     */
+    private function advanceCursorByText(string $text, int $line, int $column): array
+    {
+        $length = strlen($text);
+        for ($i = 0; $i < $length; $i++) {
+            if ($text[$i] === "\n") {
+                $line++;
+                $column = 1;
+                continue;
+            }
+            $column++;
+        }
+
+        return [$line, $column];
+    }
+
+    private function augmentParserExceptionWithTemplate(ParserException $exception, string $templatePath): ParserException
+    {
+        $context = $exception->getContext();
+        if (isset($context['template_file'], $context['line'], $context['column'])) {
+            return $exception;
+        }
+
+        return new ParserException(
+            "Template parse error in '{$templatePath}': " . $exception->getMessage(),
+            0,
+            $exception,
+            ['template_file' => $templatePath],
+            'Template syntax error.'
         );
     }
 

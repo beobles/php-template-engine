@@ -7,43 +7,53 @@ namespace Core\View\Exceptions;
  */
 class SyntaxException extends ViewException
 {
-    private string $templateFile;
-    private int $lineNumber;
-    private int $columnNumber;
-    private string $snippet;
-    private string $lintOutput;
+    private string $templateFile = '';
+    private int $lineNumber = 1;
+    private int $columnNumber = 1;
+    private string $snippet = '';
+    private string $lintOutput = '';
 
+    /**
+     * @param array<string,mixed> $context
+     */
     public function __construct(
+        string $message = 'Template syntax error.',
+        int $code = 0,
+        ?\Throwable $previous = null,
+        array $context = [],
+        string $safeMessage = 'Template syntax error.'
+    ) {
+        parent::__construct($message, $code, $previous, $context, $safeMessage);
+
+        $this->templateFile = (string) ($context['template_file'] ?? '');
+        $this->lineNumber = (int) ($context['line'] ?? 1);
+        $this->columnNumber = (int) ($context['column'] ?? 1);
+        $this->snippet = (string) ($context['snippet'] ?? '');
+        $this->lintOutput = (string) ($context['lint_output'] ?? '');
+    }
+
+    public static function fromLocation(
         string $templateFile,
         int $lineNumber,
         int $columnNumber,
         string $snippet = '',
-        string $lintOutput = '',
-        int $code = 0,
-        ?\Throwable $previous = null
-    ) {
-        $context = [
+        string $details = ''
+    ): self {
+        $message = "Template syntax error in '{$templateFile}' at line {$lineNumber}, column {$columnNumber}.";
+        if ($snippet !== '') {
+            $message .= " Snippet: {$snippet}";
+        }
+        if ($details !== '') {
+            $message .= " Details: {$details}";
+        }
+
+        return new self($message, 0, null, [
             'template_file' => $templateFile,
             'line' => $lineNumber,
             'column' => $columnNumber,
             'snippet' => $snippet,
-            'lint_output' => $lintOutput,
-        ];
-
-        $message = "Compiled template syntax error in '{$templateFile}' at line {$lineNumber}, column {$columnNumber}.";
-        if ($snippet !== '') {
-            $message .= " Snippet: {$snippet}";
-        }
-        if ($lintOutput !== '') {
-            $message .= " PHP lint: {$lintOutput}";
-        }
-
-        parent::__construct($message, $code, $previous, $context, 'Template syntax error.');
-        $this->templateFile = $templateFile;
-        $this->lineNumber = $lineNumber;
-        $this->columnNumber = $columnNumber;
-        $this->snippet = $snippet;
-        $this->lintOutput = $lintOutput;
+            'lint_output' => $details,
+        ]);
     }
 
     public function getTemplateFile(): string

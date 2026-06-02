@@ -16,6 +16,9 @@ class Lexer
     private const TOKEN_EXPRESSION = 'EXPRESSION';
     private const TOKEN_ATTRIBUTE = 'ATTRIBUTE';
     private const TOKEN_KEYWORD = 'KEYWORD';
+    /** @var array<int, array{file: string, line: int, column: int}> */
+    private array $charMap = [];
+    private string $content = '';
 
     /**
      * Tokeniza o conteúdo do template
@@ -23,8 +26,10 @@ class Lexer
      * @param string $content Conteúdo do template
      * @return array Tokens
      */
-    public function tokenize(string $content): array
+    public function tokenize(string $content, ?array $charMap = null): array
     {
+        $this->content = $content;
+        $this->charMap = $charMap ?? [];
         $tokens = [];
         $length = strlen($content);
         $pos = 0;
@@ -36,7 +41,7 @@ class Lexer
             if ($this->isDirectiveLineStart($content, $pos)) {
                 $directive = $this->extractKeywordDirective($content, $pos);
                 if ($directive !== null) {
-                    $tokens[] = $directive;
+                    $tokens[] = $this->withSourceMetadata($directive, $pos);
                     $pos += $directive['length'];
                     continue;
                 }
@@ -51,6 +56,7 @@ class Lexer
                     'length' => strlen($fullMatch),
                     'value' => $fullMatch
                 ];
+                $tokens[count($tokens) - 1] = $this->withSourceMetadata($tokens[count($tokens) - 1], $pos);
                 $pos += strlen($fullMatch);
                 continue;
             }
@@ -59,7 +65,7 @@ class Lexer
             if ($content[$pos] === '<' && preg_match('/^<([A-Z][a-zA-Z0-9]*)/', $slice, $matches)) {
                 // Isso é uma tag customizada
                 $token = $this->extractTag($content, $pos);
-                $tokens[] = $token;
+                $tokens[] = $this->withSourceMetadata($token, $pos);
                 $pos += $token['length'];
                 continue;
             }
@@ -67,7 +73,7 @@ class Lexer
             // Detectar expressão {{ }}
             if (strpos($content, '{{', $pos) === $pos) {
                 $token = $this->extractExpression($content, $pos);
-                $tokens[] = $token;
+                $tokens[] = $this->withSourceMetadata($token, $pos);
                 $pos += $token['length'];
                 continue;
             }
@@ -75,7 +81,7 @@ class Lexer
             // Detectar raw output {! !}
             if (strpos($content, '{!', $pos) === $pos) {
                 $token = $this->extractRaw($content, $pos);
-                $tokens[] = $token;
+                $tokens[] = $this->withSourceMetadata($token, $pos);
                 $pos += $token['length'];
                 continue;
             }
@@ -113,6 +119,7 @@ class Lexer
                     'value' => substr($content, $pos, $textLength),
                     'length' => $textLength
                 ];
+                $tokens[count($tokens) - 1] = $this->withSourceMetadata($tokens[count($tokens) - 1], $pos);
                 $pos += $textLength;
             }
         }
@@ -183,7 +190,7 @@ class Lexer
             $cursor++;
         }
 
-        throw new SyntaxException("Unclosed keyword directive at position $pos");
+        throw $this->syntaxError('Unclosed keyword directive', $pos);
     }
 
     /**
@@ -208,7 +215,7 @@ class Lexer
         $tagName = substr($content, $nameStart, $cursor - $nameStart);
 
         if ($tagName === '') {
-            throw new SyntaxException("Invalid tag at position $pos");
+            throw $this->syntaxError('Invalid tag', $pos);
         }
 
         $attrStart   = $cursor;
@@ -266,7 +273,7 @@ class Lexer
         }
 
         if ($attrEnd === null) {
-            throw new SyntaxException("Unclosed tag '<{$tagName}' at position $pos");
+            throw $this->syntaxError("Unclosed tag '<{$tagName}'", $pos);
         }
 
         $attrStr   = substr($content, $attrStart, $attrEnd - $attrStart);
@@ -335,7 +342,7 @@ class Lexer
             $cursor++;
         }
 
-        throw new SyntaxException("Unclosed expression at position $pos");
+        throw $this->syntaxError('Unclosed expression', $pos);
     }
 
     /**
@@ -391,6 +398,69 @@ class Lexer
             $cursor++;
         }
 
-        throw new SyntaxException("Unclosed raw output at position $pos");
+        throw $this->syntaxError('Unclosed raw output', $pos);
+    }
+
+    private function withSourceMetadata(array $token, int $offset): array
+    {
+        [$line, $column] = $this->resolveLineColumn($offset);
+        $token['line'] = $line;
+        $token['column'] = $column;
+
+        if (isset($this->charMap[$offset])) {
+            $token['source_file'] = $this->charMap[$offset]['file'];
+            $token['source_line'] = $this->charMap[$offset]['line'];
+            $token['source_column'] = $this->charMap[$offset]['column'];
+        } else {
+            $token['source_file'] = '';
+            $token['source_line'] = $line;
+            $token['source_column'] = $column;
+        }
+
+        return $token;
+    }
+
+    /**
+     * @return array{0:int,1:int}
+     */
+    private function resolveLineColumn(int $offset): array
+    {
+        if (isset($this->charMap[$offset])) {
+            return [$this->charMap[$offset]['line'], $this->charMap[$offset]['column']];
+        }
+
+        $prefix = substr($this->content, 0, max(0, $offset));
+        $line = substr_count($prefix, "\n") + 1;
+        $lastBreak = strrpos($prefix, "\n");
+        $column = $lastBreak === false ? strlen($prefix) + 1 : strlen($prefix) - $lastBreak;
+
+        return [$line, $column];
+    }
+
+    private function syntaxError(string $message, int $offset): SyntaxException
+    {
+        [$line, $column] = $this->resolveLineColumn($offset);
+        $source = $this->charMap[$offset] ?? ['file' => '', 'line' => $line, 'column' => $column];
+
+        $snippet = '';
+        $lineStart = strrpos(substr($this->content, 0, $offset), "\n");
+        $lineStart = $lineStart === false ? 0 : $lineStart + 1;
+        $lineEnd = strpos($this->content, "\n", $offset);
+        if ($lineEnd === false) {
+            $lineEnd = strlen($this->content);
+        }
+        $snippet = trim(substr($this->content, $lineStart, $lineEnd - $lineStart));
+        $templateFile = (string) ($source['file'] ?? '');
+        if ($templateFile === '') {
+            $templateFile = '[unknown template]';
+        }
+
+        return SyntaxException::fromLocation(
+            $templateFile,
+            (int) ($source['line'] ?? $line),
+            (int) ($source['column'] ?? $column),
+            $snippet,
+            $message
+        );
     }
 }

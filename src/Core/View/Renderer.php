@@ -121,7 +121,7 @@ class Renderer
 
         [$line, $column, $snippet] = $this->extractErrorLocation($templateFile, $output);
 
-        throw new SyntaxException(
+        throw SyntaxException::fromLocation(
             $templateFile,
             $line,
             $column,

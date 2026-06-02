@@ -338,8 +338,25 @@ class Parser
             $tokenPreview = substr($tokenPreview, 0, 77) . '...';
         }
 
+        $templateFile = (string) ($token['source_file'] ?? '');
+        $line = (int) ($token['source_line'] ?? ($token['line'] ?? 1));
+        $column = (int) ($token['source_column'] ?? ($token['column'] ?? 1));
+        $location = $templateFile !== ''
+            ? " in '{$templateFile}' at line {$line}, column {$column}"
+            : " at line {$line}, column {$column}";
+
         return new ParserException(
-            sprintf('%s at token #%d [%s: %s]', $message, $this->position, $tokenType, $tokenPreview)
+            sprintf('%s%s at token #%d [%s: %s]', $message, $location, $this->position, $tokenType, $tokenPreview),
+            0,
+            null,
+            [
+                'template_file' => $templateFile,
+                'line' => $line,
+                'column' => $column,
+                'token_type' => $tokenType,
+                'snippet' => $tokenPreview,
+            ],
+            'Template syntax error.'
         );
     }
 }
