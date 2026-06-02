@@ -39,25 +39,51 @@ class Renderer
 
         $targetDir ??= sys_get_temp_dir();
 
-        if (!is_dir($targetDir)) {
-            mkdir($targetDir, 0755, true);
+        if (!is_dir($targetDir) && !mkdir($targetDir, 0755, true) && !is_dir($targetDir)) {
+            throw new RuntimeException('Failed to create compiled templates directory: ' . $targetDir);
         }
 
         $file = rtrim($targetDir, '/\\') . '/tpl_' . md5($compiledCode) . '.php';
-        file_put_contents($file, $compiledCode);
+        if (file_put_contents($file, $compiledCode, LOCK_EX) === false) {
+            throw new RuntimeException('Failed to write compiled template file: ' . $file);
+        }
 
         return $file;
     }
 
     private function assertValidPhp(string $compiledFile): void
     {
-        $phpBinary = PHP_BINARY ?: 'php';
+        $phpBinary = $this->resolvePhpBinary();
         $output = [];
         $status = 0;
-        @exec(escapeshellcmd($phpBinary) . ' -l ' . escapeshellarg($compiledFile) . ' 2>&1', $output, $status);
+        exec(escapeshellarg($phpBinary) . ' -l ' . escapeshellarg($compiledFile) . ' 2>&1', $output, $status);
 
         if ($status !== 0) {
             throw new SyntaxException('Compiled template syntax error: ' . implode("\n", $output));
         }
+    }
+
+    private function resolvePhpBinary(): string
+    {
+        $candidates = [];
+
+        if (defined('PHP_BINARY') && is_string(PHP_BINARY) && PHP_BINARY !== '') {
+            $candidates[] = PHP_BINARY;
+        }
+
+        if (defined('PHP_BINDIR') && is_string(PHP_BINDIR) && PHP_BINDIR !== '') {
+            $candidates[] = rtrim(PHP_BINDIR, '/\\') . DIRECTORY_SEPARATOR . 'php';
+            if (DIRECTORY_SEPARATOR === '\\') {
+                $candidates[] = rtrim(PHP_BINDIR, '/\\') . DIRECTORY_SEPARATOR . 'php.exe';
+            }
+        }
+
+        foreach ($candidates as $candidate) {
+            if (is_file($candidate) && is_executable($candidate)) {
+                return $candidate;
+            }
+        }
+
+        return 'php';
     }
 }

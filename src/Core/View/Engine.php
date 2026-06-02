@@ -88,24 +88,27 @@ class Engine
 
         return $this->middlewarePipeline->process(
             ['template' => $templatePath, 'data' => $data],
-            function (array $context) use ($templatePath, $data, $start): string {
+            function (array $context) use ($start): string {
+                $effectiveTemplatePath = isset($context['template']) ? (string) $context['template'] : '';
+                $effectiveData = isset($context['data']) && is_array($context['data']) ? $context['data'] : [];
+
                 try {
-                    $absolutePath = $this->resolveTemplatePath($templatePath);
+                    $absolutePath = $this->resolveTemplatePath($effectiveTemplatePath);
 
                     if (!is_file($absolutePath)) {
-                        throw new ViewException("Template not found: {$templatePath}");
+                        throw new ViewException("Template not found: {$effectiveTemplatePath}");
                     }
 
-                    $compiledCode = $this->compileTemplate($absolutePath, $templatePath);
+                    $compiledCode = $this->compileTemplate($absolutePath, $effectiveTemplatePath);
 
-                    $runtimeData = array_merge($this->environment->getGlobals(), $data);
+                    $runtimeData = array_merge($this->environment->getGlobals(), $effectiveData);
                     foreach ($runtimeData as $name => $value) {
                         $this->scopeStack->set((string) $name, $value);
                     }
 
                     return $this->renderer->render($compiledCode, $runtimeData, $this);
                 } catch (\Throwable $e) {
-                    throw new ViewException("Error rendering template '{$templatePath}': " . $e->getMessage(), 0, $e);
+                    throw new ViewException("Error rendering template '{$effectiveTemplatePath}': " . $e->getMessage(), 0, $e);
                 }
             }
         );

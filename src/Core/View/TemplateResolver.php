@@ -12,6 +12,10 @@ class TemplateResolver
 
     public function resolve(string $path): string
     {
+        if (str_contains($path, "\0")) {
+            throw new ViewException('Template path contains invalid null byte.');
+        }
+
         if (str_starts_with($path, '@components/')) {
             $path = 'components/' . substr($path, strlen('@components/'));
         }
@@ -32,10 +36,22 @@ class TemplateResolver
             return $candidate;
         }
 
-        if (!str_starts_with($realCandidate, $realTemplateDir)) {
+        if (!$this->isPathInsideTemplatesDir($realCandidate, $realTemplateDir)) {
             throw new ViewException('Template path traversal is not allowed: ' . $path);
         }
 
         return $realCandidate;
+    }
+
+    private function isPathInsideTemplatesDir(string $realCandidate, string $realTemplateDir): bool
+    {
+        $normalizedTemplateDir = rtrim($realTemplateDir, DIRECTORY_SEPARATOR);
+        $normalizedCandidate = rtrim($realCandidate, DIRECTORY_SEPARATOR);
+
+        if ($normalizedCandidate === $normalizedTemplateDir) {
+            return true;
+        }
+
+        return str_starts_with($realCandidate, $normalizedTemplateDir . DIRECTORY_SEPARATOR);
     }
 }
