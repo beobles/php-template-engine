@@ -59,7 +59,13 @@ class Renderer
         exec(escapeshellarg($phpBinary) . ' -l ' . escapeshellarg($compiledFile) . ' 2>&1', $output, $status);
 
         if ($status !== 0) {
-            throw new SyntaxException('Compiled template syntax error: ' . implode("\n", $output));
+            $syntaxLines = array_filter($output, static function (string $line): bool {
+                return (bool) preg_match('/(?:Parse|Fatal) error|syntax error|Errors parsing/i', $line);
+            });
+
+            if ($syntaxLines !== []) {
+                throw new SyntaxException('Compiled template syntax error: ' . implode("\n", array_values($syntaxLines)));
+            }
         }
     }
 
@@ -79,7 +85,9 @@ class Renderer
         }
 
         foreach ($candidates as $candidate) {
-            if (is_file($candidate) && is_executable($candidate)) {
+            $base = strtolower(basename($candidate));
+            $looksLikePhpCli = str_starts_with($base, 'php') && !str_ends_with($base, '.dll');
+            if ($looksLikePhpCli && is_file($candidate) && is_executable($candidate)) {
                 return $candidate;
             }
         }
