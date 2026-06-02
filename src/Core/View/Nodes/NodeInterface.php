@@ -2,15 +2,15 @@
 
 namespace Beobles\Core\View\Nodes;
 
-/**
- * Interface para nós da AST
- */
+use Beobles\Core\View\Compiler;
+
 interface NodeInterface
 {
-    /**
-     * Retorna string de representação
-     * 
-     * @return string
-     */
-    public function __toString(): string;
+    public function compile(Compiler $compiler): string;
+
+    public function accept(callable $visitor);
+
+    public function getLine(): int;
+
+    public function getColumn(): int;
 }

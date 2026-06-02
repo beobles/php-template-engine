@@ -5,10 +5,11 @@ namespace Beobles\Core\View\Nodes;
 use Beobles\Core\View\Abstract\AbstractNode;
 use Beobles\Core\View\Compiler;
 
-class ExpressionNode extends AbstractNode
+class IncludeNode extends AbstractNode
 {
     public function __construct(
-        public string $value,
+        public string $path,
+        public ?string $dataExpression = null,
         int $line = 1,
         int $column = 1,
         array $metadata = []
@@ -18,11 +19,6 @@ class ExpressionNode extends AbstractNode
 
     public function compile(Compiler $compiler): string
     {
-        return $compiler->compileExpressionNode($this);
-    }
-
-    public function __toString(): string
-    {
-        return 'EXPRESSION: {{ ' . $this->value . ' }}';
+        return $compiler->compileIncludeNode($this);
     }
 }

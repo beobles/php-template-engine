@@ -2,22 +2,28 @@
 
 namespace Beobles\Core\View;
 
+use Beobles\Core\View\Cache\CacheKey;
 use Beobles\Core\View\Cache\CacheManager;
 use Beobles\Core\View\Cache\FileCacheAdapter;
+use Beobles\Core\View\Cache\FileWatcher;
 use Beobles\Core\View\Components\ComponentRegistry;
+use Beobles\Core\View\Debug\TemplateDebugger;
+use Beobles\Core\View\Directives\DirectiveRegistry;
+use Beobles\Core\View\Escape\Escaper;
 use Beobles\Core\View\Exceptions\ViewException;
 use Beobles\Core\View\Filters\FilterRegistry;
+use Beobles\Core\View\Layout\LayoutManager;
+use Beobles\Core\View\Middleware\CacheMiddleware;
+use Beobles\Core\View\Middleware\MiddlewarePipeline;
+use Beobles\Core\View\Middleware\ProfilingMiddleware;
+use Beobles\Core\View\Middleware\SecurityMiddleware;
+use Beobles\Core\View\Scope\ScopeStack;
+use Beobles\Core\View\Validation\TemplateValidator;
 
-/**
- * Motor de Template Engine Principal
- * 
- * Orquestra a compilação, cache e renderização de templates
- */
 class Engine
 {
     private string $templatesDir;
     private string $cacheDir;
-    private bool $autoEscape;
     private bool $cacheEnabled;
     private Environment $environment;
     private Lexer $lexer;
@@ -25,199 +31,179 @@ class Engine
     private Compiler $compiler;
     private Renderer $renderer;
     private CacheManager $cacheManager;
+    private CacheKey $cacheKey;
+    private FileWatcher $fileWatcher;
+    private TemplateResolver $templateResolver;
+    private LayoutManager $layoutManager;
     private ComponentRegistry $componentRegistry;
     private FilterRegistry $filterRegistry;
+    private ScopeStack $scopeStack;
+    private Escaper $escaper;
+    private MiddlewarePipeline $middlewarePipeline;
+    private TemplateValidator $templateValidator;
+    private TemplateDebugger $debugger;
 
-    /**
-     * Construtor do Engine
-     * 
-     * @param array $config [
-     *   'templates_dir' => string,
-     *   'cache_dir' => string,
-     *   'auto_escape' => bool,
-     *   'cache_enabled' => bool,
-     * ]
-     */
     public function __construct(array $config = [])
     {
         $this->templatesDir = $config['templates_dir'] ?? __DIR__ . '/../../../templates';
         $this->cacheDir = $config['cache_dir'] ?? __DIR__ . '/../../../cache';
-        $this->autoEscape = $config['auto_escape'] ?? true;
         $this->cacheEnabled = $config['cache_enabled'] ?? true;
 
-        // Validar diretórios
         if (!is_dir($this->templatesDir)) {
             throw new ViewException("Templates directory not found: {$this->templatesDir}");
         }
 
-        // Criar cache dir se necessário
         if ($this->cacheEnabled && !is_dir($this->cacheDir)) {
             mkdir($this->cacheDir, 0755, true);
         }
 
-        // Inicializar componentes
-        $this->environment = new Environment($config);
-        $this->lexer = new Lexer();
-        $this->parser = new Parser();
-        $this->compiler = new Compiler();
-        $this->renderer = new Renderer();
+        $this->environment = new Environment(array_merge($config, ['cache_dir' => $this->cacheDir]));
         $this->cacheManager = new CacheManager(new FileCacheAdapter($this->cacheDir));
+        $this->cacheKey = new CacheKey();
+        $this->fileWatcher = new FileWatcher();
+        $this->templateResolver = new TemplateResolver($this->templatesDir);
+        $this->layoutManager = new LayoutManager($this->templateResolver);
         $this->componentRegistry = new ComponentRegistry();
         $this->filterRegistry = new FilterRegistry();
+        $this->scopeStack = new ScopeStack();
+        $this->escaper = new Escaper();
+        $this->middlewarePipeline = new MiddlewarePipeline();
+        $this->templateValidator = new TemplateValidator();
+        $this->debugger = new TemplateDebugger();
+
+        $directiveRegistry = new DirectiveRegistry();
+        $this->lexer = new Lexer();
+        $this->parser = new Parser($directiveRegistry);
+        $this->compiler = new Compiler();
+        $this->renderer = new Renderer($this->environment->getConfig('compiled_templates_dir', $this->cacheDir));
+
+        $this->middlewarePipeline->add(new SecurityMiddleware());
+        $this->middlewarePipeline->add(new CacheMiddleware());
+        $this->middlewarePipeline->add(new ProfilingMiddleware());
     }
 
-    /**
-     * Renderiza um template com dados
-     * 
-     * @param string $templatePath Caminho relativo do template
-     * @param array $data Dados para o template
-     * @return string HTML renderizado
-     */
     public function render(string $templatePath, array $data = []): string
     {
-        try {
-            // Resolver caminho absoluto do template
-            $absolutePath = $this->resolveTemplatePath($templatePath);
+        $start = $this->debugger->begin();
 
-            if (!file_exists($absolutePath)) {
-                throw new ViewException("Template not found: {$templatePath}");
-            }
+        return $this->middlewarePipeline->process(
+            ['template' => $templatePath, 'data' => $data],
+            function (array $context) use ($templatePath, $data, $start): string {
+                try {
+                    $absolutePath = $this->resolveTemplatePath($templatePath);
 
-            // Verificar cache
-            if ($this->cacheEnabled) {
-                $cacheKey = $this->generateCacheKey($templatePath);
-                $cachedContent = $this->cacheManager->get($cacheKey);
+                    if (!is_file($absolutePath)) {
+                        throw new ViewException("Template not found: {$templatePath}");
+                    }
 
-                if ($cachedContent !== null) {
-                    return $this->renderer->render($cachedContent, $data, $this);
+                    $compiledCode = $this->compileTemplate($absolutePath, $templatePath);
+
+                    $runtimeData = array_merge($this->environment->getGlobals(), $data);
+                    foreach ($runtimeData as $name => $value) {
+                        $this->scopeStack->set((string) $name, $value);
+                    }
+
+                    return $this->renderer->render($compiledCode, $runtimeData, $this);
+                } catch (\Throwable $e) {
+                    throw new ViewException("Error rendering template '{$templatePath}': " . $e->getMessage(), 0, $e);
                 }
             }
-
-            // Ler template
-            $content = file_get_contents($absolutePath);
-
-            // Tokenizar
-            $tokens = $this->lexer->tokenize($content);
-
-            // Fazer parse
-            $ast = $this->parser->parse($tokens);
-
-            // Compilar
-            $compiledCode = $this->compiler->compile($ast);
-
-            // Cachear se habilitado
-            if ($this->cacheEnabled) {
-                $this->cacheManager->set($cacheKey, $compiledCode);
-            }
-
-            // Renderizar
-            return $this->renderer->render($compiledCode, $data, $this);
-        } catch (\Exception $e) {
-            throw new ViewException("Error rendering template '{$templatePath}': " . $e->getMessage(), 0, $e);
-        }
+        );
     }
 
-    /**
-     * Registra um componente customizado
-     * 
-     * @param string $name Nome do componente
-     * @param string $path Caminho do arquivo
-     * @return void
-     */
     public function registerComponent(string $name, string $path): void
     {
         $this->componentRegistry->register($name, $path);
     }
 
-    /**
-     * Registra um filtro customizado
-     * 
-     * @param string $name Nome do filtro
-     * @param callable $callback Callback do filtro
-     * @return void
-     */
     public function registerFilter(string $name, callable $callback): void
     {
         $this->filterRegistry->register($name, $callback);
     }
 
-    /**
-     * Resolve o caminho completo do template
-     * 
-     * @param string $path Caminho relativo
-     * @return string Caminho absoluto
-     */
     public function resolveTemplatePath(string $path): string
     {
-        // Resolver alias @components
-        if (strpos($path, '@') === 0) {
-            $path = str_replace('@components/', 'components/', $path);
-        }
-
-        // Adicionar extensão se necessário
-        if (!str_ends_with($path, '.html')) {
-            $path .= '.html';
-        }
-
-        return $this->templatesDir . '/' . $path;
+        return $this->templateResolver->resolve($path);
     }
 
-    /**
-     * Gera chave de cache
-     * 
-     * @param string $path Caminho do template
-     * @return string Chave de cache
-     */
-    private function generateCacheKey(string $path): string
-    {
-        return 'template_' . md5($path);
-    }
-
-    /**
-     * Renderiza um componente
-     * 
-     * @param string $name Nome do componente
-     * @param array $props Props do componente
-     * @return string HTML renderizado
-     */
     public function renderComponent(string $name, array $props = []): string
     {
         $componentPath = $this->componentRegistry->resolve($name);
         return $this->render($componentPath, ['props' => $props]);
     }
 
-    /**
-     * Aplica um filtro a um valor
-     * 
-     * @param mixed $value Valor
-     * @param string $filter Nome do filtro
-     * @param array $args Argumentos do filtro
-     * @return mixed Valor filtrado
-     */
-    public function applyFilter($value, string $filter, array $args = [])
+    public function applyFilter(mixed $value, string $filter, array $args = []): mixed
     {
         return $this->filterRegistry->apply($value, $filter, $args);
     }
 
-    /**
-     * Obtém o environment
-     * 
-     * @return Environment
-     */
+    public function escape(mixed $value, string $context = 'html'): string
+    {
+        return $this->escaper->escape($value, $context);
+    }
+
+    /** @param array<string, mixed> $scope */
+    public function resolveValue(string $path, array $scope): mixed
+    {
+        if (str_contains($path, '.')) {
+            $segments = explode('.', $path);
+            $current = $scope[$segments[0]] ?? $this->scopeStack->get($segments[0]);
+
+            foreach (array_slice($segments, 1) as $segment) {
+                if (is_array($current) && array_key_exists($segment, $current)) {
+                    $current = $current[$segment];
+                    continue;
+                }
+
+                if (is_object($current) && isset($current->{$segment})) {
+                    $current = $current->{$segment};
+                    continue;
+                }
+
+                return null;
+            }
+
+            return $current;
+        }
+
+        return $scope[$path] ?? $this->scopeStack->get($path);
+    }
+
     public function getEnvironment(): Environment
     {
         return $this->environment;
     }
 
-    /**
-     * Limpa o cache
-     * 
-     * @return void
-     */
     public function clearCache(): void
     {
         if ($this->cacheEnabled) {
             $this->cacheManager->clear();
         }
+    }
+
+    private function compileTemplate(string $absolutePath, string $templatePath): string
+    {
+        $source = (string) file_get_contents($absolutePath);
+        $merged = $this->layoutManager->merge($absolutePath, $source);
+        $this->templateValidator->validate($merged);
+
+        $cacheKey = $this->cacheKey->forTemplate($templatePath, [$absolutePath]);
+
+        if ($this->cacheEnabled && !$this->fileWatcher->hasChanged([$absolutePath])) {
+            $cached = $this->cacheManager->get($cacheKey);
+            if ($cached !== null) {
+                return $cached;
+            }
+        }
+
+        $tokens = $this->lexer->tokenize($merged, $absolutePath);
+        $ast = $this->parser->parse($tokens);
+        $compiledCode = $this->compiler->compile($ast);
+
+        if ($this->cacheEnabled) {
+            $this->cacheManager->set($cacheKey, $compiledCode);
+        }
+
+        return $compiledCode;
     }
 }

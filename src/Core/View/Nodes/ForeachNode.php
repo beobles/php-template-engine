@@ -5,10 +5,13 @@ namespace Beobles\Core\View\Nodes;
 use Beobles\Core\View\Abstract\AbstractNode;
 use Beobles\Core\View\Compiler;
 
-class ExpressionNode extends AbstractNode
+class ForeachNode extends AbstractNode
 {
+    /** @param array<NodeInterface> $children */
     public function __construct(
-        public string $value,
+        public string $items,
+        public string $as,
+        public array $children = [],
         int $line = 1,
         int $column = 1,
         array $metadata = []
@@ -18,11 +21,6 @@ class ExpressionNode extends AbstractNode
 
     public function compile(Compiler $compiler): string
     {
-        return $compiler->compileExpressionNode($this);
-    }
-
-    public function __toString(): string
-    {
-        return 'EXPRESSION: {{ ' . $this->value . ' }}';
+        return $compiler->compileForeachNode($this);
     }
 }

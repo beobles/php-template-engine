@@ -2,220 +2,341 @@
 
 namespace Beobles\Core\View;
 
-use Beobles\Core\View\Nodes\TextNode;
-use Beobles\Core\View\Nodes\ExpressionNode;
-use Beobles\Core\View\Nodes\RawNode;
-use Beobles\Core\View\Nodes\ComponentNode;
-use Beobles\Core\View\Nodes\IfNode;
+use Beobles\Core\View\Directives\BlockDirective;
+use Beobles\Core\View\Directives\DirectiveRegistry;
+use Beobles\Core\View\Directives\ForeachDirective;
+use Beobles\Core\View\Directives\IfDirective;
+use Beobles\Core\View\Directives\IncludeDirective;
+use Beobles\Core\View\Directives\SetDirective;
 use Beobles\Core\View\Exceptions\ParserException;
+use Beobles\Core\View\Nodes\BlockNode;
+use Beobles\Core\View\Nodes\ComponentNode;
+use Beobles\Core\View\Nodes\ExpressionNode;
+use Beobles\Core\View\Nodes\ForeachNode;
+use Beobles\Core\View\Nodes\IfNode;
+use Beobles\Core\View\Nodes\IncludeNode;
+use Beobles\Core\View\Nodes\NodeInterface;
+use Beobles\Core\View\Nodes\RawNode;
+use Beobles\Core\View\Nodes\SetNode;
+use Beobles\Core\View\Nodes\TextNode;
 
-/**
- * Parser de AST (Abstract Syntax Tree)
- * Converte tokens em nós para compilação
- */
 class Parser
 {
-    private array $tokens;
+    /** @var array<int, array<string, mixed>> */
+    private array $tokens = [];
     private int $position = 0;
+    private DirectiveRegistry $directives;
 
-    /**
-     * Faz parse dos tokens
-     * 
-     * @param array $tokens Tokens da lexer
-     * @return array AST (nodes)
+    public function __construct(?DirectiveRegistry $directiveRegistry = null)
+    {
+        $this->directives = $directiveRegistry ?? new DirectiveRegistry();
+        $this->registerDefaults();
+    }
+
+    /** @param array<int, array<string, mixed>> $tokens
+     *  @return array<int, NodeInterface>
      */
     public function parse(array $tokens): array
     {
         $this->tokens = $tokens;
         $this->position = 0;
+
+        return $this->parseNodes();
+    }
+
+    /** @return array<int, NodeInterface> */
+    private function parseNodes(?string $stopTag = null): array
+    {
         $nodes = [];
 
-        while ($this->position < count($tokens)) {
-            $token = $this->current();
+        while (($token = $this->current()) !== null) {
+            if ($token['type'] === 'TAG_CLOSE') {
+                if ($stopTag !== null && strcasecmp($token['name'], $stopTag) === 0) {
+                    $this->advance();
+                    return $nodes;
+                }
 
-            if ($token['type'] === 'TEXT') {
-                $nodes[] = new TextNode($token['value']);
-                $this->advance();
-            } elseif ($token['type'] === 'EXPRESSION') {
-                $nodes[] = new ExpressionNode($token['value']);
-                $this->advance();
-            } elseif ($token['type'] === 'RAW') {
-                $nodes[] = new RawNode($token['value']);
-                $this->advance();
-            } elseif ($token['type'] === 'TAG') {
-                $node = $this->parseTag();
-                if ($node) {
-                    $nodes[] = $node;
-                }
-            } elseif ($token['type'] === 'KEYWORD') {
-                $node = $this->parseKeyword();
-                if ($node) {
-                    $nodes[] = $node;
-                }
-            } else {
-                $this->advance();
+                $this->error("Unexpected closing tag </{$token['name']}>", $token);
             }
+
+            $nodes[] = $this->parseNode();
+        }
+
+        if ($stopTag !== null) {
+            $this->error("Unclosed tag <{$stopTag}>", $this->tokens[count($this->tokens) - 1] ?? ['line' => 1, 'column' => 1, 'source' => 'template']);
         }
 
         return $nodes;
     }
 
-    /**
-     * Parse de uma tag customizada
-     * 
-     * @return object Node
-     */
-    private function parseTag(): ?object
+    private function parseNode(): NodeInterface
     {
         $token = $this->current();
-        $tagName = $token['name'];
-
-        $this->advance();
-
-        switch ($tagName) {
-            case 'If':
-                return $this->parseIfTag($token);
-            case 'Block':
-                return $this->parseBlockTag($token);
-            case 'Foreach':
-                return $this->parseForEachTag($token);
-            case 'Component':
-            case preg_match('/^[A-Z]/', $tagName) ? $tagName : null:
-                return $this->parseComponentTag($token);
-            default:
-                return null;
+        if ($token === null) {
+            $this->error('Unexpected end of template', ['line' => 1, 'column' => 1, 'source' => 'template']);
         }
+
+        return match ($token['type']) {
+            'TEXT' => $this->parseTextNode(),
+            'EXPRESSION' => $this->parseExpressionNode(),
+            'RAW' => $this->parseRawNode(),
+            'TAG_OPEN' => $this->parseTagNode($token),
+            default => $this->error('Unexpected token type: ' . $token['type'], $token),
+        };
     }
 
-    /**
-     * Parse de keyword (extends, import)
-     * 
-     * @return object Node
-     */
-    private function parseKeyword(): ?object
+    private function parseTextNode(): TextNode
     {
-        $token = $this->current();
-        $keyword = $token['value'];
-
-        $this->advance();
-
-        // Implementar parsing de keywords conforme necessário
-        return null;
+        $token = $this->consume('TEXT');
+        return new TextNode($token['value'], $token['line'], $token['column']);
     }
 
-    /**
-     * Parse de tag If
-     * 
-     * @param array $token Token da tag
-     * @return IfNode
-     */
-    private function parseIfTag(array $token): IfNode
+    private function parseExpressionNode(): ExpressionNode
     {
-        // Extrair condition do atributo
-        preg_match('/condition\s*=\s*["\']?\{\{(.+?)\}\}["\']?/', $token['attributes'], $matches);
-        $condition = $matches[1] ?? '';
-
-        return new IfNode($condition);
+        $token = $this->consume('EXPRESSION');
+        return new ExpressionNode($token['value'], $token['line'], $token['column']);
     }
 
-    /**
-     * Parse de tag Block
-     * 
-     * @param array $token Token da tag
-     * @return BlockNode
-     */
-    private function parseBlockTag(array $token): BlockNode
+    private function parseRawNode(): RawNode
     {
-        preg_match('/name\s*=\s*["\']([^"\']*)["\']/s', $token['attributes'], $matches);
-        $name = $matches[1] ?? '';
-
-        return new BlockNode($name);
+        $token = $this->consume('RAW');
+        return new RawNode($token['value'], $token['line'], $token['column']);
     }
 
-    /**
-     * Parse de tag Foreach
-     * 
-     * @param array $token Token da tag
-     * @return ForeachNode
-     */
-    private function parseForEachTag(array $token): ForeachNode
-    {
-        preg_match('/items\s*=\s*\{\{(.+?)\}\}/', $token['attributes'], $itemsMatches);
-        preg_match('/as\s*=\s*["\']([^"\']*)["\']/s', $token['attributes'], $asMatches);
-
-        $items = $itemsMatches[1] ?? '';
-        $as = $asMatches[1] ?? '';
-
-        return new ForeachNode($items, $as);
-    }
-
-    /**
-     * Parse de tag de componente
-     * 
-     * @param array $token Token da tag
-     * @return ComponentNode
-     */
-    private function parseComponentTag(array $token): ComponentNode
+    private function parseTagNode(array $token): NodeInterface
     {
         $name = $token['name'];
-        $attributes = $this->parseAttributes($token['attributes']);
 
-        return new ComponentNode($name, $attributes);
+        return match (strtolower($name)) {
+            'if' => $this->parseIfNode(),
+            'foreach' => $this->parseForeachNode(),
+            'block' => $this->parseBlockNode(),
+            'set' => $this->parseSetNode(),
+            'include' => $this->parseIncludeNode(),
+            'elseif', 'else' => $this->error("Unexpected <{$name}> without matching <If>", $token),
+            default => $this->parseComponentNode(),
+        };
     }
 
-    /**
-     * Parse de atributos
-     * 
-     * @param string $attributesStr String de atributos
-     * @return array Atributos parseados
-     */
+    private function parseIfNode(): IfNode
+    {
+        $ifToken = $this->consume('TAG_OPEN');
+        $directive = $this->directives->get('if');
+        $attrs = $directive ? $directive->parseAttributes($ifToken['attributes']) : [];
+        $condition = trim((string) ($attrs['condition'] ?? ''));
+
+        if ($condition === '') {
+            $this->error('<If> requires condition attribute', $ifToken);
+        }
+
+        $branches = [];
+        $branches[] = ['condition' => $condition, 'nodes' => $this->parseUntilIfBoundary()];
+
+        while (($token = $this->current()) !== null && $token['type'] === 'TAG_OPEN') {
+            if (strcasecmp($token['name'], 'ElseIf') === 0) {
+                $elseifToken = $this->consume('TAG_OPEN');
+                $attrs = $directive ? $directive->parseAttributes($elseifToken['attributes']) : [];
+                $elseifCondition = trim((string) ($attrs['condition'] ?? ''));
+                if ($elseifCondition === '') {
+                    $this->error('<ElseIf> requires condition attribute', $elseifToken);
+                }
+
+                $branches[] = ['condition' => $elseifCondition, 'nodes' => $this->parseUntilIfBoundary()];
+                continue;
+            }
+
+            if (strcasecmp($token['name'], 'Else') === 0) {
+                $this->consume('TAG_OPEN');
+                $branches[] = ['condition' => null, 'nodes' => $this->parseNodes('Else')];
+                break;
+            }
+
+            break;
+        }
+
+        $this->consumeWhitespaceText();
+
+        $closeIf = $this->current();
+        if ($closeIf === null || $closeIf['type'] !== 'TAG_CLOSE' || strcasecmp($closeIf['name'], 'If') !== 0) {
+            $this->error('Missing closing </If>', $ifToken);
+        }
+
+        $this->advance();
+
+        return new IfNode($branches, $ifToken['line'], $ifToken['column']);
+    }
+
+    /** @return array<int, NodeInterface> */
+    private function parseUntilIfBoundary(): array
+    {
+        $nodes = [];
+
+        while (($token = $this->current()) !== null) {
+            if ($token['type'] === 'TAG_OPEN' && in_array(strtolower($token['name']), ['elseif', 'else'], true)) {
+                return $nodes;
+            }
+
+            if ($token['type'] === 'TAG_CLOSE' && strcasecmp($token['name'], 'If') === 0) {
+                return $nodes;
+            }
+
+            $nodes[] = $this->parseNode();
+        }
+
+        return $nodes;
+    }
+
+    private function parseForeachNode(): ForeachNode
+    {
+        $token = $this->consume('TAG_OPEN');
+        $directive = $this->directives->get('foreach');
+        $attrs = $directive ? $directive->parseAttributes($token['attributes']) : [];
+
+        $items = trim((string) ($attrs['items'] ?? ''));
+        $as = trim((string) ($attrs['as'] ?? ''));
+
+        if ($items === '' || $as === '') {
+            $this->error('<Foreach> requires items and as attributes', $token);
+        }
+
+        $children = $this->parseNodes('Foreach');
+
+        return new ForeachNode($items, $as, $children, $token['line'], $token['column']);
+    }
+
+    private function parseBlockNode(): BlockNode
+    {
+        $token = $this->consume('TAG_OPEN');
+        $directive = $this->directives->get('block');
+        $attrs = $directive ? $directive->parseAttributes($token['attributes']) : [];
+        $name = trim((string) ($attrs['name'] ?? ''));
+
+        if ($name === '') {
+            $this->error('<Block> requires name attribute', $token);
+        }
+
+        $children = $token['self_closing'] ? [] : $this->parseNodes('Block');
+
+        return new BlockNode($name, $children, $token['line'], $token['column']);
+    }
+
+    private function parseSetNode(): SetNode
+    {
+        $token = $this->consume('TAG_OPEN');
+        $directive = $this->directives->get('set');
+        $attrs = $directive ? $directive->parseAttributes($token['attributes']) : [];
+        $variable = trim((string) ($attrs['var'] ?? ''));
+        $value = trim((string) ($attrs['value'] ?? ''));
+
+        if ($variable === '' || $value === '') {
+            $this->error('<Set> requires var and value attributes', $token);
+        }
+
+        if (!$token['self_closing']) {
+            $this->parseNodes('Set');
+        }
+
+        return new SetNode($variable, $value, $token['line'], $token['column']);
+    }
+
+    private function parseIncludeNode(): IncludeNode
+    {
+        $token = $this->consume('TAG_OPEN');
+        $directive = $this->directives->get('include');
+        $attrs = $directive ? $directive->parseAttributes($token['attributes']) : [];
+        $path = trim((string) ($attrs['path'] ?? ''));
+
+        if ($path === '') {
+            $this->error('<Include> requires path attribute', $token);
+        }
+
+        if (!$token['self_closing']) {
+            $this->parseNodes('Include');
+        }
+
+        return new IncludeNode($path, $attrs['data'] ?? null, $token['line'], $token['column']);
+    }
+
+    private function parseComponentNode(): ComponentNode
+    {
+        $token = $this->consume('TAG_OPEN');
+        $attributes = $this->parseAttributes($token['attributes']);
+
+        if (!$token['self_closing']) {
+            $this->parseNodes($token['name']);
+        }
+
+        return new ComponentNode($token['name'], $attributes, $token['line'], $token['column']);
+    }
+
+    /** @return array<string, string> */
     private function parseAttributes(string $attributesStr): array
     {
+        if (trim($attributesStr) === '') {
+            return [];
+        }
+
         $attributes = [];
-        preg_match_all('/(\w+)\s*=\s*(?:\{\{(.+?)\}\}|["\']([^"\']*)["\']/s', $attributesStr, $matches, PREG_SET_ORDER);
+        preg_match_all('/([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:\{\{(.+?)\}\}|"([^"]*)"|\'([^\']*)\')/s', $attributesStr, $matches, PREG_SET_ORDER);
 
         foreach ($matches as $match) {
             $name = $match[1];
-            $value = $match[2] ?? $match[3] ?? '';
-            $attributes[$name] = $value;
+            $value = $match[2] ?? $match[3] ?? $match[4] ?? '';
+            $attributes[$name] = trim($value);
         }
 
         return $attributes;
     }
 
-    /**
-     * Obtém token atual
-     * 
-     * @return array Token
-     */
-    private function current(): array
+    /** @return array<string, mixed> */
+    private function consume(string $type): array
     {
-        return $this->tokens[$this->position] ?? [];
+        $token = $this->current();
+        if ($token === null || $token['type'] !== $type) {
+            $this->error("Expected {$type}", $token ?? ['line' => 1, 'column' => 1, 'source' => 'template']);
+        }
+
+        $this->advance();
+
+        return $token;
     }
 
-    /**
-     * Avança para próximo token
-     * 
-     * @return void
-     */
+    private function current(): ?array
+    {
+        return $this->tokens[$this->position] ?? null;
+    }
+
     private function advance(): void
     {
         $this->position++;
     }
-}
 
-// Node classes
-class BlockNode
-{
-    public function __construct(
-        public string $name
-    ) {}
-}
+    private function consumeWhitespaceText(): void
+    {
+        while (($token = $this->current()) !== null && $token['type'] === 'TEXT' && trim((string) $token['value']) === '') {
+            $this->advance();
+        }
+    }
 
-class ForeachNode
-{
-    public function __construct(
-        public string $items,
-        public string $as
-    ) {}
+    private function registerDefaults(): void
+    {
+        foreach ([
+            new IfDirective(),
+            new ForeachDirective(),
+            new BlockDirective(),
+            new SetDirective(),
+            new IncludeDirective(),
+        ] as $directive) {
+            $this->directives->register($directive);
+        }
+    }
+
+    private function error(string $message, array $token): never
+    {
+        $line = (int) ($token['line'] ?? 1);
+        $column = (int) ($token['column'] ?? 1);
+        $source = (string) ($token['source'] ?? 'template');
+
+        throw new ParserException(sprintf('%s at %s:%d:%d', $message, $source, $line, $column));
+    }
 }
