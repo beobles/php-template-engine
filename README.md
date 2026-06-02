@@ -90,14 +90,22 @@ src/Core/View/
 ├── Compiler.php               # Compila templates
 ├── Parser.php                 # Parser da AST
 ├── Lexer.php                  # Tokenizador
-├── Renderer.php               # Renderizador
+├── Renderer.php               # Renderização via include (sem eval)
 ├── Environment.php            # Configuração
-├── Nodes/                     # AST Nodes
-├── Directives/                # Processadores de tags
-├── Filters/                   # Filtros
+├── TemplateResolver.php       # Resolução segura de caminhos
+├── Abstract/                  # Bases abstratas (Node/Directive/Filter/Middleware)
+├── Nodes/                     # AST nodes compiláveis
+├── Directives/                # Registry + directives padrão
+├── Filters/                   # Filtros por domínio + registry
+├── Scope/                     # Scope e pilha de variáveis
+├── Layout/                    # Herança de templates e blocos
+├── Cache/                     # Cache key + file watcher
+├── Escape/                    # Escape context-aware (HTML/JS/CSS/URI)
+├── Middleware/                # Pipeline de middlewares
+├── Validation/                # Validação de sintaxe/template
+├── Debug/                     # Source/runtime debugging helpers
 ├── Components/                # Sistema de componentes
-├── Cache/                     # Cache
-└── Exceptions/                # Exceções
+└── Exceptions/                # Hierarquia de exceções
 ```
 
 ## Contribuindo
