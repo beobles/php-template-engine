@@ -88,6 +88,7 @@ Veja [SYNTAX.md](./SYNTAX.md) para documentação completa da sintaxe.
 - `debug: true` (padrão): mantém mensagens detalhadas para facilitar desenvolvimento.
 - `debug: false` ou `environment: 'production'`: retorna mensagens seguras e genéricas para produção.
 - Erros de sintaxe compilada geram `SyntaxException` com contexto interno (arquivo, linha, coluna e snippet), preservado no encadeamento da exceção.
+- Em templates com `extends`, as exceções de léxico/parser apontam o arquivo original (ex.: `layouts/base.html`) com linha e coluna exatas.
 
 ## Estrutura do Projeto
 

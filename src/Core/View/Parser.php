@@ -21,7 +21,7 @@ class Parser
 {
     private array $tokens;
     private int $position = 0;
-    /** @var array<int, array{tag: string, hasElse: bool}> */
+    /** @var array<int, array{tag: string, hasElse: bool, file: string, line: int, column: int}> */
     private array $controlStack = [];
 
     /**
@@ -55,8 +55,7 @@ class Parser
         }
 
         if ($this->controlStack !== []) {
-            $openTags = implode(', ', array_map(static fn(array $entry): string => $entry['tag'], $this->controlStack));
-            throw $this->parserError("Unclosed control tags: {$openTags}");
+            throw $this->unclosedControlTagsError();
         }
 
         return $nodes;
@@ -165,7 +164,13 @@ class Parser
             throw $this->parserError('<If> requires a non-empty condition attribute');
         }
 
-        $this->controlStack[] = ['tag' => 'If', 'hasElse' => false];
+        $this->controlStack[] = [
+            'tag' => 'If',
+            'hasElse' => false,
+            'file' => (string) ($this->current()['source_file'] ?? ''),
+            'line' => (int) ($this->current()['source_line'] ?? ($this->current()['line'] ?? 1)),
+            'column' => (int) ($this->current()['source_column'] ?? ($this->current()['column'] ?? 1)),
+        ];
 
         return new IfNode($condition);
     }
@@ -224,7 +229,13 @@ class Parser
             throw $this->parserError('<Block> requires a non-empty name attribute');
         }
 
-        $this->controlStack[] = ['tag' => 'Block', 'hasElse' => false];
+        $this->controlStack[] = [
+            'tag' => 'Block',
+            'hasElse' => false,
+            'file' => (string) ($this->current()['source_file'] ?? ''),
+            'line' => (int) ($this->current()['source_line'] ?? ($this->current()['line'] ?? 1)),
+            'column' => (int) ($this->current()['source_column'] ?? ($this->current()['column'] ?? 1)),
+        ];
 
         return new BlockNode($name);
     }
@@ -245,7 +256,13 @@ class Parser
             throw $this->parserError('<Foreach> requires a non-empty as attribute');
         }
 
-        $this->controlStack[] = ['tag' => 'Foreach', 'hasElse' => false];
+        $this->controlStack[] = [
+            'tag' => 'Foreach',
+            'hasElse' => false,
+            'file' => (string) ($this->current()['source_file'] ?? ''),
+            'line' => (int) ($this->current()['source_line'] ?? ($this->current()['line'] ?? 1)),
+            'column' => (int) ($this->current()['source_column'] ?? ($this->current()['column'] ?? 1)),
+        ];
 
         return new ForeachNode($items, $as);
     }
@@ -355,6 +372,35 @@ class Parser
                 'column' => $column,
                 'token_type' => $tokenType,
                 'snippet' => $tokenPreview,
+            ],
+            'Template syntax error.'
+        );
+    }
+
+    private function unclosedControlTagsError(): ParserException
+    {
+        $openTags = implode(', ', array_map(
+            static function (array $entry): string {
+                $location = $entry['file'] !== ''
+                    ? " in '{$entry['file']}' at line {$entry['line']}, column {$entry['column']}"
+                    : " at line {$entry['line']}, column {$entry['column']}";
+                return $entry['tag'] . $location;
+            },
+            $this->controlStack
+        ));
+
+        $first = $this->controlStack[0];
+
+        return new ParserException(
+            "Unclosed control tags: {$openTags}",
+            0,
+            null,
+            [
+                'template_file' => $first['file'],
+                'line' => $first['line'],
+                'column' => $first['column'],
+                'token_type' => 'TAG',
+                'snippet' => $first['tag'],
             ],
             'Template syntax error.'
         );
