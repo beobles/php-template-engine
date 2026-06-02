@@ -83,55 +83,88 @@ class Engine
     public function render(string $templatePath, array $data = []): string
     {
         try {
-            // Resolver caminho absoluto do template
             $absolutePath = $this->resolveTemplatePath($templatePath);
-
             if (!file_exists($absolutePath)) {
                 throw new ViewException("Template not found: {$templatePath}");
             }
 
             $dependencies = $this->collectTemplateDependencies($absolutePath, [$absolutePath]);
+            $cacheKey = null;
 
-            // Verificar cache
             if ($this->cacheEnabled) {
                 $cacheKey = $this->generateCacheKey($dependencies);
                 $cachedContent = $this->cacheManager->get($cacheKey);
 
                 if ($cachedContent !== null) {
-                    return $this->renderer->render($cachedContent, $data, $this);
+                    return $this->renderer->render($cachedContent, $this->prepareRenderData($data), $this);
                 }
             }
 
-            // Ler template
-            $content = file_get_contents($absolutePath);
-            if ($content === false) {
-                throw new ViewException("Unable to read template: {$templatePath}");
-            }
+            $compiledCode = $this->compileTemplate($absolutePath, $templatePath);
+            $output = $this->renderer->render($compiledCode, $this->prepareRenderData($data), $this);
 
-            // Resolver herança de templates (extends + blocks)
-            $content = $this->resolveTemplateInheritance($content, [$absolutePath]);
-
-            // Tokenizar
-            $tokens = $this->lexer->tokenize($content);
-
-            // Fazer parse
-            $ast = $this->parser->parse($tokens);
-
-            // Compilar
-            $compiledCode = $this->compiler->compile($ast);
-
-            // Renderizar
-            $output = $this->renderer->render($compiledCode, $data, $this);
-
-            // Cachear se habilitado
-            if ($this->cacheEnabled) {
+            if ($this->cacheEnabled && $cacheKey !== null) {
                 $this->cacheManager->set($cacheKey, $compiledCode);
             }
 
             return $output;
         } catch (\Throwable $e) {
-            throw new ViewException("Error rendering template '{$templatePath}': " . $e->getMessage(), 0, $e);
+            throw $this->normalizeRenderException($templatePath, $e);
         }
+    }
+
+    private function compileTemplate(string $absolutePath, string $templatePath): string
+    {
+        $content = $this->readTemplateFile($absolutePath, $templatePath);
+        $content = $this->resolveTemplateInheritance($content, [$absolutePath]);
+        $tokens = $this->lexer->tokenize($content);
+        $ast = $this->parser->parse($tokens);
+
+        return $this->compiler->compile($ast);
+    }
+
+    private function readTemplateFile(string $absolutePath, string $templatePath): string
+    {
+        $content = file_get_contents($absolutePath);
+        if ($content === false) {
+            throw new ViewException("Unable to read template: {$templatePath}");
+        }
+
+        return $content;
+    }
+
+    private function prepareRenderData(array $data): array
+    {
+        return array_merge($this->environment->getGlobals(), $data);
+    }
+
+    private function normalizeRenderException(string $templatePath, \Throwable $exception): ViewException
+    {
+        if ($this->environment->isDebug()) {
+            if ($exception instanceof ViewException) {
+                return $exception;
+            }
+
+            return new ViewException(
+                "Error rendering template '{$templatePath}': " . $exception->getMessage(),
+                0,
+                $exception,
+                ['template' => $templatePath],
+                'Template rendering failed.'
+            );
+        }
+
+        $safeMessage = $exception instanceof ViewException
+            ? $exception->getSafeMessage()
+            : 'Template rendering failed.';
+
+        return new ViewException(
+            $safeMessage,
+            0,
+            $exception,
+            ['template' => $templatePath],
+            $safeMessage
+        );
     }
 
     /**

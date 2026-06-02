@@ -2,6 +2,7 @@
 
 namespace Core\View;
 
+use Core\View\Exceptions\ViewException;
 use Core\View\Exceptions\SyntaxException;
 
 /**
@@ -50,7 +51,13 @@ class Renderer
     {
         if (!is_dir($this->compiledTemplatesDir)) {
             if (!mkdir($this->compiledTemplatesDir, 0755, true) && !is_dir($this->compiledTemplatesDir)) {
-                throw new \RuntimeException("Unable to create compiled template directory: {$this->compiledTemplatesDir}");
+                throw new ViewException(
+                    "Unable to create compiled template directory: {$this->compiledTemplatesDir}",
+                    0,
+                    null,
+                    ['compiled_templates_dir' => $this->compiledTemplatesDir],
+                    'Template rendering failed.'
+                );
             }
         }
 
@@ -61,13 +68,25 @@ class Renderer
             $tmpFile = $targetFile . '.tmp.' . bin2hex(random_bytes(6));
             $bytes = file_put_contents($tmpFile, $compiledCode, LOCK_EX);
             if ($bytes === false) {
-                throw new \RuntimeException("Unable to write compiled template file: {$targetFile}");
+                throw new ViewException(
+                    "Unable to write compiled template file: {$targetFile}",
+                    0,
+                    null,
+                    ['compiled_template_file' => $targetFile],
+                    'Template rendering failed.'
+                );
             }
 
             if (!@rename($tmpFile, $targetFile)) {
                 @unlink($tmpFile);
                 if (!is_file($targetFile)) {
-                    throw new \RuntimeException("Unable to finalize compiled template file: {$targetFile}");
+                    throw new ViewException(
+                        "Unable to finalize compiled template file: {$targetFile}",
+                        0,
+                        null,
+                        ['compiled_template_file' => $targetFile],
+                        'Template rendering failed.'
+                    );
                 }
             }
         }
@@ -103,9 +122,11 @@ class Renderer
         [$line, $column, $snippet] = $this->extractErrorLocation($templateFile, $output);
 
         throw new SyntaxException(
-            "Compiled template syntax error in '{$templateFile}' at line {$line}, column {$column}." .
-            ($snippet !== '' ? " Snippet: {$snippet}" : '') .
-            ($output !== '' ? " PHP lint: {$output}" : '')
+            $templateFile,
+            $line,
+            $column,
+            $snippet,
+            $output
         );
     }
 

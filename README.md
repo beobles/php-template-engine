@@ -35,7 +35,8 @@ use Core\View\Engine;
 $engine = new Engine([
     'templates_dir' => __DIR__ . '/templates',
     'cache_dir' => __DIR__ . '/cache',
-    'auto_escape' => true
+    'auto_escape' => true,
+    'debug' => true, // false em produção para mensagens seguras
 ]);
 
 echo $engine->render('home.html', [
@@ -81,6 +82,12 @@ import { UserCard } from "@components/UserCard";
 ## Documentação
 
 Veja [SYNTAX.md](./SYNTAX.md) para documentação completa da sintaxe.
+
+## Modo Debug e Produção
+
+- `debug: true` (padrão): mantém mensagens detalhadas para facilitar desenvolvimento.
+- `debug: false` ou `environment: 'production'`: retorna mensagens seguras e genéricas para produção.
+- Erros de sintaxe compilada geram `SyntaxException` com contexto interno (arquivo, linha, coluna e snippet), preservado no encadeamento da exceção.
 
 ## Estrutura do Projeto
 

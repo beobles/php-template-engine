@@ -9,7 +9,8 @@ $engine = new Engine([
     'templates_dir' => __DIR__ . '/templates',
     'cache_dir' => __DIR__ . '/../cache',
     'auto_escape' => true,
-    'cache_enabled' => true
+    'cache_enabled' => true,
+    'debug' => true
 ]);
 
 // Dados para o template
