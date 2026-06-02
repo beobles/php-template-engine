@@ -13,7 +13,11 @@ class CloseTagNode implements NodeInterface
 
     public function compile(CompilationContext $ctx): void
     {
-        if ($this->tagName !== 'Block') {
+        if ($this->tagName === 'Foreach') {
+            $ctx->writeLine('}');
+            // Restaura o $__loop do loop pai (suporte a foreach aninhado)
+            $ctx->writeLine('$__loop = array_pop($__loop_stack);');
+        } elseif ($this->tagName !== 'Block') {
             $ctx->writeLine('}');
         }
     }

@@ -151,7 +151,7 @@ Com índice:
 Com chave e valor (arrays associativos):
 
 ```html
-<Foreach items={{ config }} as="key,value">
+<Foreach items={{ config }} as="value,key">
   <div>{{ key }}: {{ value }}</div>
 </Foreach>
 ```

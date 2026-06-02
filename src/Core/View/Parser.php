@@ -113,6 +113,11 @@ class Parser
             return null;
         }
 
+        // ElseIf não empilha no controlStack, logo </ElseIf> é ignorado silenciosamente
+        if ($name === 'ElseIf') {
+            return null;
+        }
+
         if (!in_array($name, ['If', 'Foreach', 'Block'], true)) {
             throw new ParserException("Unexpected closing tag </{$name}>");
         }

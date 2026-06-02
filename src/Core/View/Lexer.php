@@ -187,32 +187,98 @@ class Lexer
     }
 
     /**
-     * Extrai uma tag customizada
-     * 
+     * Extrai uma tag customizada usando um scanner de caracteres que lida
+     * corretamente com '>' dentro de valores de atributos (strings entre
+     * aspas e expressões {{ }}).
+     *
      * @param string $content Conteúdo
      * @param int $pos Posição atual
      * @return array Token da tag
      */
     private function extractTag(string $content, int $pos): array
     {
-        preg_match('/^<([A-Z][a-zA-Z0-9]*)([^>]*)\s*\/?>/s', substr($content, $pos), $matches);
+        $length = strlen($content);
+        $cursor = $pos + 1; // avança além do '<'
 
-        if (empty($matches)) {
+        // Lê o nome da tag: letras, dígitos e underscore
+        $nameStart = $cursor;
+        while ($cursor < $length && (ctype_alnum($content[$cursor]) || $content[$cursor] === '_')) {
+            $cursor++;
+        }
+        $tagName = substr($content, $nameStart, $cursor - $nameStart);
+
+        if ($tagName === '') {
             throw new SyntaxException("Invalid tag at position $pos");
         }
 
-        $tagName = $matches[1];
-        $attributes = trim($matches[2]);
-        $fullMatch = $matches[0];
-        $selfClosing = str_ends_with($fullMatch, '/>');
+        $attrStart   = $cursor;
+        $attrEnd     = null;
+        $selfClosing = false;
+
+        while ($cursor < $length) {
+            $char = $content[$cursor];
+
+            // Valor de atributo entre aspas — ignora qualquer '>' interno
+            if ($char === '"' || $char === "'") {
+                $quote = $char;
+                $cursor++;
+                while ($cursor < $length && $content[$cursor] !== $quote) {
+                    if ($content[$cursor] === '\\') {
+                        $cursor++; // pula char escapado
+                    }
+                    $cursor++;
+                }
+                if ($cursor < $length) {
+                    $cursor++; // pula a aspa de fechamento
+                }
+                continue;
+            }
+
+            // Expressão de template {{ ... }} — ignora qualquer '>' interno
+            if ($char === '{' && ($content[$cursor + 1] ?? '') === '{') {
+                $cursor += 2;
+                while ($cursor < $length) {
+                    if ($content[$cursor] === '}' && ($content[$cursor + 1] ?? '') === '}') {
+                        $cursor += 2;
+                        break;
+                    }
+                    $cursor++;
+                }
+                continue;
+            }
+
+            // Fechamento auto-fechante: />
+            if ($char === '/' && ($content[$cursor + 1] ?? '') === '>') {
+                $attrEnd     = $cursor;
+                $selfClosing = true;
+                $cursor     += 2;
+                break;
+            }
+
+            // Fechamento normal: >
+            if ($char === '>') {
+                $attrEnd = $cursor;
+                $cursor++;
+                break;
+            }
+
+            $cursor++;
+        }
+
+        if ($attrEnd === null) {
+            throw new SyntaxException("Unclosed tag '<{$tagName}' at position $pos");
+        }
+
+        $attrStr   = substr($content, $attrStart, $attrEnd - $attrStart);
+        $fullMatch = substr($content, $pos, $cursor - $pos);
 
         return [
-            'type' => 'TAG',
-            'name' => $tagName,
-            'attributes' => $attributes,
+            'type'         => 'TAG',
+            'name'         => $tagName,
+            'attributes'   => trim($attrStr),
             'self_closing' => $selfClosing,
-            'length' => strlen($fullMatch),
-            'value' => $fullMatch
+            'length'       => $cursor - $pos,
+            'value'        => $fullMatch,
         ];
     }
 
