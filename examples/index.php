@@ -2,7 +2,7 @@
 
 require_once __DIR__ . '/../autoload.php';
 
-use Beobles\Core\View\Engine;
+use Core\View\Engine;
 
 // Criar engine
 $engine = new Engine([

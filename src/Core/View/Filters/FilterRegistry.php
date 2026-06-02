@@ -1,8 +1,8 @@
 <?php
 
-namespace Beobles\Core\View\Filters;
+namespace Core\View\Filters;
 
-use Beobles\Core\View\Exceptions\ViewException;
+use Core\View\Exceptions\ViewException;
 
 class FilterRegistry
 {
@@ -42,8 +42,28 @@ class FilterRegistry
             }
         }
 
-        $this->register('reverse', fn($v) => is_array($v) ? array_reverse($v) : strrev((string) $v));
+        $this->register('reverse', fn($v) => is_array($v) ? array_reverse($v) : self::reverseString((string) $v));
         $this->register('raw', fn($v) => $v);
         $this->register('escape', fn($v) => htmlspecialchars((string) $v, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'));
+    }
+
+    private static function reverseString(string $value): string
+    {
+        if ($value === '') {
+            return '';
+        }
+
+        if (function_exists('mb_strlen') && function_exists('mb_substr')) {
+            $length = mb_strlen($value, 'UTF-8');
+            $reversed = '';
+            for ($i = $length - 1; $i >= 0; $i--) {
+                $char = mb_substr($value, $i, 1, 'UTF-8');
+                $reversed .= $char === false ? '' : $char;
+            }
+
+            return $reversed;
+        }
+
+        return strrev($value);
     }
 }

@@ -1,24 +1,24 @@
 <?php
 
-namespace Beobles\Core\View;
+namespace Core\View;
 
-use Beobles\Core\View\Cache\CacheKey;
-use Beobles\Core\View\Cache\CacheManager;
-use Beobles\Core\View\Cache\FileCacheAdapter;
-use Beobles\Core\View\Cache\FileWatcher;
-use Beobles\Core\View\Components\ComponentRegistry;
-use Beobles\Core\View\Debug\TemplateDebugger;
-use Beobles\Core\View\Directives\DirectiveRegistry;
-use Beobles\Core\View\Escape\Escaper;
-use Beobles\Core\View\Exceptions\ViewException;
-use Beobles\Core\View\Filters\FilterRegistry;
-use Beobles\Core\View\Layout\LayoutManager;
-use Beobles\Core\View\Middleware\CacheMiddleware;
-use Beobles\Core\View\Middleware\MiddlewarePipeline;
-use Beobles\Core\View\Middleware\ProfilingMiddleware;
-use Beobles\Core\View\Middleware\SecurityMiddleware;
-use Beobles\Core\View\Scope\ScopeStack;
-use Beobles\Core\View\Validation\TemplateValidator;
+use Core\View\Cache\CacheKey;
+use Core\View\Cache\CacheManager;
+use Core\View\Cache\FileCacheAdapter;
+use Core\View\Cache\FileWatcher;
+use Core\View\Components\ComponentRegistry;
+use Core\View\Debug\TemplateDebugger;
+use Core\View\Directives\DirectiveRegistry;
+use Core\View\Escape\Escaper;
+use Core\View\Exceptions\ViewException;
+use Core\View\Filters\FilterRegistry;
+use Core\View\Layout\LayoutManager;
+use Core\View\Middleware\CacheMiddleware;
+use Core\View\Middleware\MiddlewarePipeline;
+use Core\View\Middleware\ProfilingMiddleware;
+use Core\View\Middleware\SecurityMiddleware;
+use Core\View\Scope\ScopeStack;
+use Core\View\Validation\TemplateValidator;
 
 class Engine
 {
@@ -88,24 +88,27 @@ class Engine
 
         return $this->middlewarePipeline->process(
             ['template' => $templatePath, 'data' => $data],
-            function (array $context) use ($templatePath, $data, $start): string {
+            function (array $context) use ($start): string {
+                $effectiveTemplatePath = isset($context['template']) ? (string) $context['template'] : '';
+                $effectiveData = isset($context['data']) && is_array($context['data']) ? $context['data'] : [];
+
                 try {
-                    $absolutePath = $this->resolveTemplatePath($templatePath);
+                    $absolutePath = $this->resolveTemplatePath($effectiveTemplatePath);
 
                     if (!is_file($absolutePath)) {
-                        throw new ViewException("Template not found: {$templatePath}");
+                        throw new ViewException("Template not found: {$effectiveTemplatePath}");
                     }
 
-                    $compiledCode = $this->compileTemplate($absolutePath, $templatePath);
+                    $compiledCode = $this->compileTemplate($absolutePath, $effectiveTemplatePath);
 
-                    $runtimeData = array_merge($this->environment->getGlobals(), $data);
+                    $runtimeData = array_merge($this->environment->getGlobals(), $effectiveData);
                     foreach ($runtimeData as $name => $value) {
                         $this->scopeStack->set((string) $name, $value);
                     }
 
                     return $this->renderer->render($compiledCode, $runtimeData, $this);
                 } catch (\Throwable $e) {
-                    throw new ViewException("Error rendering template '{$templatePath}': " . $e->getMessage(), 0, $e);
+                    throw new ViewException("Error rendering template '{$effectiveTemplatePath}': " . $e->getMessage(), 0, $e);
                 }
             }
         );
@@ -183,7 +186,11 @@ class Engine
 
     private function compileTemplate(string $absolutePath, string $templatePath): string
     {
-        $source = (string) file_get_contents($absolutePath);
+        $source = file_get_contents($absolutePath);
+        if ($source === false) {
+            throw new ViewException("Cannot read template file: {$absolutePath}");
+        }
+
         $merged = $this->layoutManager->merge($absolutePath, $source);
         $this->templateValidator->validate($merged);
 

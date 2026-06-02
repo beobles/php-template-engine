@@ -1,9 +1,9 @@
 <?php
 
-namespace Beobles\Core\View\Abstract;
+namespace Core\View\Abstract;
 
-use Beobles\Core\View\Compiler;
-use Beobles\Core\View\Nodes\NodeInterface;
+use Core\View\Compiler;
+use Core\View\Nodes\NodeInterface;
 
 abstract class AbstractNode implements NodeInterface
 {

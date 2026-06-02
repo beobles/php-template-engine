@@ -1,24 +1,24 @@
 <?php
 
-namespace Beobles\Core\View;
+namespace Core\View;
 
-use Beobles\Core\View\Directives\BlockDirective;
-use Beobles\Core\View\Directives\DirectiveRegistry;
-use Beobles\Core\View\Directives\ForeachDirective;
-use Beobles\Core\View\Directives\IfDirective;
-use Beobles\Core\View\Directives\IncludeDirective;
-use Beobles\Core\View\Directives\SetDirective;
-use Beobles\Core\View\Exceptions\ParserException;
-use Beobles\Core\View\Nodes\BlockNode;
-use Beobles\Core\View\Nodes\ComponentNode;
-use Beobles\Core\View\Nodes\ExpressionNode;
-use Beobles\Core\View\Nodes\ForeachNode;
-use Beobles\Core\View\Nodes\IfNode;
-use Beobles\Core\View\Nodes\IncludeNode;
-use Beobles\Core\View\Nodes\NodeInterface;
-use Beobles\Core\View\Nodes\RawNode;
-use Beobles\Core\View\Nodes\SetNode;
-use Beobles\Core\View\Nodes\TextNode;
+use Core\View\Directives\BlockDirective;
+use Core\View\Directives\DirectiveRegistry;
+use Core\View\Directives\ForeachDirective;
+use Core\View\Directives\IfDirective;
+use Core\View\Directives\IncludeDirective;
+use Core\View\Directives\SetDirective;
+use Core\View\Exceptions\ParserException;
+use Core\View\Nodes\BlockNode;
+use Core\View\Nodes\ComponentNode;
+use Core\View\Nodes\ExpressionNode;
+use Core\View\Nodes\ForeachNode;
+use Core\View\Nodes\IfNode;
+use Core\View\Nodes\IncludeNode;
+use Core\View\Nodes\NodeInterface;
+use Core\View\Nodes\RawNode;
+use Core\View\Nodes\SetNode;
+use Core\View\Nodes\TextNode;
 
 class Parser
 {

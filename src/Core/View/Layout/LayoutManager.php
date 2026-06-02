@@ -1,8 +1,8 @@
 <?php
 
-namespace Beobles\Core\View\Layout;
+namespace Core\View\Layout;
 
-use Beobles\Core\View\TemplateResolver;
+use Core\View\TemplateResolver;
 
 class LayoutManager
 {
@@ -27,7 +27,10 @@ class LayoutManager
             return $this->layoutResolver->stripExtendsStatement($content);
         }
 
-        $parentContent = (string) file_get_contents($parentPath);
+        $parentContent = file_get_contents($parentPath);
+        if ($parentContent === false) {
+            return $this->layoutResolver->stripExtendsStatement($content);
+        }
 
         $merged = preg_replace_callback(
             '/<Block\s+name\s*=\s*["\']([^"\']+)["\']\s*>(.*?)<\/Block>/si',

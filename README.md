@@ -30,7 +30,7 @@
 <?php
 require_once 'autoload.php';
 
-use Beobles\Core\View\Engine;
+use Core\View\Engine;
 
 $engine = new Engine([
     'templates_dir' => __DIR__ . '/templates',
@@ -81,6 +81,14 @@ import { UserCard } from "@components/UserCard";
 ## Documentação
 
 Veja [SYNTAX.md](./SYNTAX.md) para documentação completa da sintaxe.
+
+## Validação rápida
+
+```bash
+find . -name '*.php' | xargs php -l
+php examples/index.php
+php examples/edge_matrix.php
+```
 
 ## Estrutura do Projeto
 

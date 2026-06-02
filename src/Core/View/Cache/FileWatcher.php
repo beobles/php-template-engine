@@ -1,6 +1,6 @@
 <?php
 
-namespace Beobles\Core\View\Cache;
+namespace Core\View\Cache;
 
 class FileWatcher
 {
