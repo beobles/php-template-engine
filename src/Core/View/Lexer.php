@@ -284,53 +284,113 @@ class Lexer
 
     /**
      * Extrai uma expressão {{ }}
-     * 
+     *
+     * Usa um scanner de caracteres para ignorar corretamente }}
+     * que apareçam dentro de strings entre aspas na expressão.
+     *
      * @param string $content Conteúdo
      * @param int $pos Posição atual
      * @return array Token da expressão
      */
     private function extractExpression(string $content, int $pos): array
     {
-        $start = $pos + 2;
-        $end = strpos($content, '}}', $start);
+        $length = strlen($content);
+        $cursor = $pos + 2; // avança além de {{
+        $buffer = '';
+        $quote  = null;
 
-        if ($end === false) {
-            throw new SyntaxException("Unclosed expression at position $pos");
+        while ($cursor < $length) {
+            $char = $content[$cursor];
+
+            if ($quote !== null) {
+                if ($char === '\\' && $cursor + 1 < $length) {
+                    $buffer .= $char . $content[$cursor + 1];
+                    $cursor += 2;
+                    continue;
+                }
+                if ($char === $quote) {
+                    $quote = null;
+                }
+                $buffer .= $char;
+                $cursor++;
+                continue;
+            }
+
+            if ($char === '"' || $char === "'") {
+                $quote   = $char;
+                $buffer .= $char;
+                $cursor++;
+                continue;
+            }
+
+            if ($char === '}' && ($content[$cursor + 1] ?? '') === '}') {
+                return [
+                    'type'   => 'EXPRESSION',
+                    'value'  => trim($buffer),
+                    'length' => $cursor - $pos + 2,
+                ];
+            }
+
+            $buffer .= $char;
+            $cursor++;
         }
 
-        $expression = substr($content, $start, $end - $start);
-        $length = $end - $pos + 2;
-
-        return [
-            'type' => 'EXPRESSION',
-            'value' => trim($expression),
-            'length' => $length
-        ];
+        throw new SyntaxException("Unclosed expression at position $pos");
     }
 
     /**
      * Extrai raw output {! !}
-     * 
+     *
+     * Usa um scanner de caracteres para ignorar corretamente !}
+     * que apareçam dentro de strings entre aspas na expressão.
+     *
      * @param string $content Conteúdo
      * @param int $pos Posição atual
      * @return array Token raw
      */
     private function extractRaw(string $content, int $pos): array
     {
-        $start = $pos + 2;
-        $end = strpos($content, '!}', $start);
+        $length = strlen($content);
+        $cursor = $pos + 2; // avança além de {!
+        $buffer = '';
+        $quote  = null;
 
-        if ($end === false) {
-            throw new SyntaxException("Unclosed raw output at position $pos");
+        while ($cursor < $length) {
+            $char = $content[$cursor];
+
+            if ($quote !== null) {
+                if ($char === '\\' && $cursor + 1 < $length) {
+                    $buffer .= $char . $content[$cursor + 1];
+                    $cursor += 2;
+                    continue;
+                }
+                if ($char === $quote) {
+                    $quote = null;
+                }
+                $buffer .= $char;
+                $cursor++;
+                continue;
+            }
+
+            if ($char === '"' || $char === "'") {
+                $quote   = $char;
+                $buffer .= $char;
+                $cursor++;
+                continue;
+            }
+
+            if ($char === '!' && ($content[$cursor + 1] ?? '') === '}') {
+                return [
+                    'type'   => 'RAW',
+                    'value'  => trim($buffer),
+                    'length' => $cursor - $pos + 2,
+                ];
+            }
+
+            $buffer .= $char;
+            $cursor++;
         }
 
-        $expression = substr($content, $start, $end - $start);
-        $length = $end - $pos + 2;
-
-        return [
-            'type' => 'RAW',
-            'value' => trim($expression),
-            'length' => $length
-        ];
+        throw new SyntaxException("Unclosed raw output at position $pos");
     }
 }
