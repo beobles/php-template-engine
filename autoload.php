@@ -6,7 +6,7 @@
  */
 
 spl_autoload_register(function ($class) {
-    $prefix = 'Beobles\\Core\\View\\';
+    $prefix = 'Core\\View\\';
     $baseDir = __DIR__ . '/src/Core/View/';
 
     if (strpos($class, $prefix) !== 0) {

@@ -1,8 +1,8 @@
 <?php
 
-namespace Beobles\Core\View\Directives;
+namespace Core\View\Directives;
 
-use Beobles\Core\View\Abstract\AbstractDirective;
+use Core\View\Abstract\AbstractDirective;
 
 class SetDirective extends AbstractDirective
 {

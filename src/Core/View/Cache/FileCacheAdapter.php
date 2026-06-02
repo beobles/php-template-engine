@@ -1,6 +1,6 @@
 <?php
 
-namespace Beobles\Core\View\Cache;
+namespace Core\View\Cache;
 
 /**
  * Adaptador de cache em arquivo
@@ -23,13 +23,34 @@ class FileCacheAdapter implements CacheInterface
             return null;
         }
 
-        return file_get_contents($file);
+        $content = file_get_contents($file);
+        if ($content === false) {
+            return null;
+        }
+
+        $payload = @unserialize($content, ['allowed_classes' => false]);
+        if (!is_array($payload) || !array_key_exists('value', $payload) || !array_key_exists('expires_at', $payload)) {
+            return $content;
+        }
+
+        $expiresAt = $payload['expires_at'];
+        if (is_int($expiresAt) && $expiresAt > 0 && $expiresAt < time()) {
+            $this->delete($key);
+            return null;
+        }
+
+        return $payload['value'];
     }
 
     public function set(string $key, $value, int $ttl = 3600): void
     {
         $file = $this->getFilePath($key);
-        file_put_contents($file, $value);
+        $expiresAt = $ttl > 0 ? time() + $ttl : null;
+        $payload = serialize([
+            'value' => $value,
+            'expires_at' => $expiresAt,
+        ]);
+        file_put_contents($file, $payload);
     }
 
     public function delete(string $key): void
