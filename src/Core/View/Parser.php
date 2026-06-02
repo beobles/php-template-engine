@@ -1,221 +1,408 @@
 <?php
 
-namespace Beobles\Core\View;
+namespace Core\View;
 
-use Beobles\Core\View\Nodes\TextNode;
-use Beobles\Core\View\Nodes\ExpressionNode;
-use Beobles\Core\View\Nodes\RawNode;
-use Beobles\Core\View\Nodes\ComponentNode;
-use Beobles\Core\View\Nodes\IfNode;
-use Beobles\Core\View\Exceptions\ParserException;
+use Core\View\Exceptions\ParserException;
+use Core\View\Nodes\BlockNode;
+use Core\View\Nodes\CloseTagNode;
+use Core\View\Nodes\ComponentNode;
+use Core\View\Nodes\ElseIfNode;
+use Core\View\Nodes\ElseNode;
+use Core\View\Nodes\ExpressionNode;
+use Core\View\Nodes\ForeachNode;
+use Core\View\Nodes\IfNode;
+use Core\View\Nodes\RawNode;
+use Core\View\Nodes\TextNode;
 
 /**
- * Parser de AST (Abstract Syntax Tree)
- * Converte tokens em nós para compilação
+ * Converte tokens em nós (AST plana) para compilação posterior.
  */
 class Parser
 {
     private array $tokens;
     private int $position = 0;
+    /** @var array<int, array{tag: string, hasElse: bool, file: string, line: int, column: int}> */
+    private array $controlStack = [];
 
     /**
-     * Faz parse dos tokens
-     * 
-     * @param array $tokens Tokens da lexer
-     * @return array AST (nodes)
+     * @param  array $tokens Tokens produzidos pela Lexer
+     * @return array<\Core\View\Nodes\NodeInterface>
      */
     public function parse(array $tokens): array
     {
         $this->tokens = $tokens;
         $this->position = 0;
+        $this->controlStack = [];
         $nodes = [];
 
-        while ($this->position < count($tokens)) {
+        while ($this->position < count($this->tokens)) {
             $token = $this->current();
+            $node = match ($token['type'] ?? '') {
+                'TEXT'       => $this->parseText(),
+                'EXPRESSION' => $this->parseExpression(),
+                'RAW'        => $this->parseRaw(),
+                'TAG'        => $this->parseTag(),
+                'TAG_CLOSE'  => $this->parseCloseTag(),
+                'KEYWORD'    => $this->parseKeyword(),
+                default      => null,
+            };
 
-            if ($token['type'] === 'TEXT') {
-                $nodes[] = new TextNode($token['value']);
-                $this->advance();
-            } elseif ($token['type'] === 'EXPRESSION') {
-                $nodes[] = new ExpressionNode($token['value']);
-                $this->advance();
-            } elseif ($token['type'] === 'RAW') {
-                $nodes[] = new RawNode($token['value']);
-                $this->advance();
-            } elseif ($token['type'] === 'TAG') {
-                $node = $this->parseTag();
-                if ($node) {
-                    $nodes[] = $node;
-                }
-            } elseif ($token['type'] === 'KEYWORD') {
-                $node = $this->parseKeyword();
-                if ($node) {
-                    $nodes[] = $node;
-                }
-            } else {
-                $this->advance();
+            if ($node !== null) {
+                $nodes[] = $node;
             }
+
+            $this->advance();
+        }
+
+        if ($this->controlStack !== []) {
+            throw $this->unclosedControlTagsError();
         }
 
         return $nodes;
     }
 
-    /**
-     * Parse de uma tag customizada
-     * 
-     * @return object Node
-     */
-    private function parseTag(): ?object
+    // -------------------------------------------------------------------------
+    // Token-type handlers
+    // -------------------------------------------------------------------------
+
+    private function parseText(): TextNode
+    {
+        return new TextNode($this->current()['value']);
+    }
+
+    private function parseExpression(): ExpressionNode
+    {
+        return new ExpressionNode($this->current()['value']);
+    }
+
+    private function parseRaw(): RawNode
+    {
+        return new RawNode($this->current()['value']);
+    }
+
+    private function parseTag(): ?\Core\View\Nodes\NodeInterface
     {
         $token = $this->current();
         $tagName = $token['name'];
+        $isSelfClosing = (bool) ($token['self_closing'] ?? false);
 
-        $this->advance();
-
-        switch ($tagName) {
-            case 'If':
-                return $this->parseIfTag($token);
-            case 'Block':
-                return $this->parseBlockTag($token);
-            case 'Foreach':
-                return $this->parseForEachTag($token);
-            case 'Component':
-            case preg_match('/^[A-Z]/', $tagName) ? $tagName : null:
-                return $this->parseComponentTag($token);
-            default:
-                return null;
-        }
+        return match ($tagName) {
+            'If'        => $this->parseIfTag($token['attributes'], $isSelfClosing),
+            'ElseIf'    => $this->parseElseIfTag($token['attributes'], $isSelfClosing),
+            'Else'      => $this->parseElseTag($isSelfClosing),
+            'Block'     => $this->parseBlockTag($token['attributes'], $isSelfClosing),
+            'Foreach'   => $this->parseForeachTag($token['attributes'], $isSelfClosing),
+            'Component' => $this->parseComponentTag($token),
+            default     => preg_match('/^[A-Z]/', $tagName) === 1
+                ? $this->parseComponentTag($token)
+                : null,
+        };
     }
 
-    /**
-     * Parse de keyword (extends, import)
-     * 
-     * @return object Node
-     */
-    private function parseKeyword(): ?object
+    private function parseCloseTag(): ?CloseTagNode
     {
         $token = $this->current();
-        $keyword = $token['value'];
+        $name = $token['name'] ?? '';
 
-        $this->advance();
+        if ($name === 'Else') {
+            $current = end($this->controlStack);
+            if ($current === false || $current['tag'] !== 'If' || !$current['hasElse']) {
+                throw $this->parserError('Unexpected closing tag </Else> without an active <Else> block');
+            }
+            return null;
+        }
 
-        // Implementar parsing de keywords conforme necessário
+        // ElseIf não empilha no controlStack, logo </ElseIf> é ignorado silenciosamente
+        if ($name === 'ElseIf') {
+            return null;
+        }
+
+        if (!in_array($name, ['If', 'Foreach', 'Block'], true)) {
+            throw $this->parserError("Unexpected closing tag </{$name}>");
+        }
+
+        $current = end($this->controlStack);
+        if ($current === false || $current['tag'] !== $name) {
+            $openTag = $current['tag'] ?? 'none';
+            throw $this->parserError("Mismatched closing tag </{$name}>. Current open tag: {$openTag}");
+        }
+
+        array_pop($this->controlStack);
+
+        return new CloseTagNode($name);
+    }
+
+    private function parseKeyword(): null
+    {
+        // Keywords (extends, import) reserved for future implementation
         return null;
     }
 
-    /**
-     * Parse de tag If
-     * 
-     * @param array $token Token da tag
-     * @return IfNode
-     */
-    private function parseIfTag(array $token): IfNode
+    // -------------------------------------------------------------------------
+    // Component helper
+    // -------------------------------------------------------------------------
+
+    private function parseComponentTag(array $token): ComponentNode
     {
-        // Extrair condition do atributo
-        preg_match('/condition\s*=\s*["\']?\{\{(.+?)\}\}["\']?/', $token['attributes'], $matches);
-        $condition = $matches[1] ?? '';
+        if (!(bool) ($token['self_closing'] ?? false)) {
+            throw $this->parserError(
+                "Component tag <{$token['name']}> must be self-closing (use <{$token['name']} ... />)"
+            );
+        }
+
+        return new ComponentNode($token['name'], $this->parseAttributes($token['attributes']));
+    }
+
+    private function parseIfTag(string $attributes, bool $isSelfClosing): IfNode
+    {
+        if ($isSelfClosing) {
+            throw $this->parserError('<If> cannot be self-closing');
+        }
+
+        $condition = $this->extractAttributeValue($attributes, 'condition');
+        if ($condition === '') {
+            throw $this->parserError('<If> requires a non-empty condition attribute');
+        }
+
+        $this->controlStack[] = [
+            'tag' => 'If',
+            'hasElse' => false,
+            'file' => (string) ($this->current()['source_file'] ?? ''),
+            'line' => (int) ($this->current()['source_line'] ?? ($this->current()['line'] ?? 1)),
+            'column' => (int) ($this->current()['source_column'] ?? ($this->current()['column'] ?? 1)),
+        ];
 
         return new IfNode($condition);
     }
 
-    /**
-     * Parse de tag Block
-     * 
-     * @param array $token Token da tag
-     * @return BlockNode
-     */
-    private function parseBlockTag(array $token): BlockNode
+    private function parseElseIfTag(string $attributes, bool $isSelfClosing): ElseIfNode
     {
-        preg_match('/name\s*=\s*["\']([^"\']*)["\']/s', $token['attributes'], $matches);
-        $name = $matches[1] ?? '';
+        if ($isSelfClosing) {
+            throw $this->parserError('<ElseIf> cannot be self-closing');
+        }
+
+        $current = end($this->controlStack);
+        if ($current === false || $current['tag'] !== 'If') {
+            throw $this->parserError('<ElseIf> must be inside an <If> block');
+        }
+
+        if ($current['hasElse']) {
+            throw $this->parserError('<ElseIf> cannot appear after <Else> in the same <If> block');
+        }
+
+        $condition = $this->extractAttributeValue($attributes, 'condition');
+        if ($condition === '') {
+            throw $this->parserError('<ElseIf> requires a non-empty condition attribute');
+        }
+
+        return new ElseIfNode($condition);
+    }
+
+    private function parseElseTag(bool $isSelfClosing): ElseNode
+    {
+        if ($isSelfClosing) {
+            throw $this->parserError('<Else> cannot be self-closing');
+        }
+
+        $stackIndex = array_key_last($this->controlStack);
+        if ($stackIndex === null || $this->controlStack[$stackIndex]['tag'] !== 'If') {
+            throw $this->parserError('<Else> must be inside an <If> block');
+        }
+
+        if ($this->controlStack[$stackIndex]['hasElse']) {
+            throw $this->parserError('Only one <Else> is allowed per <If> block');
+        }
+
+        $this->controlStack[$stackIndex]['hasElse'] = true;
+
+        return new ElseNode();
+    }
+
+    private function parseBlockTag(string $attributes, bool $isSelfClosing): BlockNode
+    {
+        if ($isSelfClosing) {
+            throw $this->parserError('<Block> cannot be self-closing');
+        }
+
+        $name = $this->extractAttributeValue($attributes, 'name');
+        if ($name === '') {
+            throw $this->parserError('<Block> requires a non-empty name attribute');
+        }
+
+        $this->controlStack[] = [
+            'tag' => 'Block',
+            'hasElse' => false,
+            'file' => (string) ($this->current()['source_file'] ?? ''),
+            'line' => (int) ($this->current()['source_line'] ?? ($this->current()['line'] ?? 1)),
+            'column' => (int) ($this->current()['source_column'] ?? ($this->current()['column'] ?? 1)),
+        ];
 
         return new BlockNode($name);
     }
 
-    /**
-     * Parse de tag Foreach
-     * 
-     * @param array $token Token da tag
-     * @return ForeachNode
-     */
-    private function parseForEachTag(array $token): ForeachNode
+    private function parseForeachTag(string $attributes, bool $isSelfClosing): ForeachNode
     {
-        preg_match('/items\s*=\s*\{\{(.+?)\}\}/', $token['attributes'], $itemsMatches);
-        preg_match('/as\s*=\s*["\']([^"\']*)["\']/s', $token['attributes'], $asMatches);
+        if ($isSelfClosing) {
+            throw $this->parserError('<Foreach> cannot be self-closing');
+        }
 
-        $items = $itemsMatches[1] ?? '';
-        $as = $asMatches[1] ?? '';
+        $items = $this->extractAttributeValue($attributes, 'items');
+        $as = $this->extractAttributeValue($attributes, 'as');
+
+        if ($items === '') {
+            throw $this->parserError('<Foreach> requires a non-empty items attribute');
+        }
+        if ($as === '') {
+            throw $this->parserError('<Foreach> requires a non-empty as attribute');
+        }
+
+        $this->controlStack[] = [
+            'tag' => 'Foreach',
+            'hasElse' => false,
+            'file' => (string) ($this->current()['source_file'] ?? ''),
+            'line' => (int) ($this->current()['source_line'] ?? ($this->current()['line'] ?? 1)),
+            'column' => (int) ($this->current()['source_column'] ?? ($this->current()['column'] ?? 1)),
+        ];
 
         return new ForeachNode($items, $as);
     }
 
-    /**
-     * Parse de tag de componente
-     * 
-     * @param array $token Token da tag
-     * @return ComponentNode
-     */
-    private function parseComponentTag(array $token): ComponentNode
-    {
-        $name = $token['name'];
-        $attributes = $this->parseAttributes($token['attributes']);
-
-        return new ComponentNode($name, $attributes);
-    }
+    // -------------------------------------------------------------------------
+    // Attribute helpers
+    // -------------------------------------------------------------------------
 
     /**
-     * Parse de atributos
-     * 
-     * @param string $attributesStr String de atributos
-     * @return array Atributos parseados
+     * Extracts all key=>value attribute pairs from the raw attributes string.
      */
     private function parseAttributes(string $attributesStr): array
     {
         $attributes = [];
-        preg_match_all('/(\w+)\s*=\s*(?:\{\{(.+?)\}\}|["\']([^"\']*)["\']/s', $attributesStr, $matches, PREG_SET_ORDER);
+        if (trim($attributesStr) === '') {
+            return $attributes;
+        }
+
+        preg_match_all('/(\w+)\s*=\s*(?:\{\{\s*(.+?)\s*\}\}|["\']([^"\']*)["\'])/s', $attributesStr, $matches, PREG_SET_ORDER);
 
         foreach ($matches as $match) {
-            $name = $match[1];
-            $value = $match[2] ?? $match[3] ?? '';
-            $attributes[$name] = $value;
+            $name  = $match[1];
+            $value = isset($match[2]) && $match[2] !== ''
+                ? trim($match[2])
+                : var_export($match[3] ?? '', true);
+            $attributes[$name] = trim($value);
         }
 
         return $attributes;
     }
 
     /**
-     * Obtém token atual
-     * 
-     * @return array Token
+     * Extracts the value of a single named attribute from the raw attributes string.
+     * Supports {{ expression }}, "string", and 'string' formats.
+     * When a quoted value itself contains {{ }}, the delimiters are stripped.
      */
-    private function current(): array
+    private function extractAttributeValue(string $attributes, string $name): string
     {
-        return $this->tokens[$this->position] ?? [];
+        $qName = preg_quote($name, '/');
+
+        // attribute="{{ expr }}" — expression in curly delimiters
+        if (preg_match('/' . $qName . '\s*=\s*\{\{\s*(.*?)\s*\}\}/s', $attributes, $m) === 1) {
+            return trim($m[1]);
+        }
+        // attribute="..." or attribute='...'
+        if (preg_match('/' . $qName . '\s*=\s*"([^"]*)"/s', $attributes, $m) === 1) {
+            return $this->unwrapCurly(trim($m[1]));
+        }
+        if (preg_match('/' . $qName . '\s*=\s*\'([^\']*)\'/s', $attributes, $m) === 1) {
+            return $this->unwrapCurly(trim($m[1]));
+        }
+
+        return '';
     }
 
     /**
-     * Avança para próximo token
-     * 
-     * @return void
+     * If the value is wrapped in {{ }}, strips the delimiters and returns the inner expression.
      */
+    private function unwrapCurly(string $value): string
+    {
+        if (preg_match('/^\{\{\s*(.*?)\s*\}\}$/s', $value, $m) === 1) {
+            return trim($m[1]);
+        }
+        return $value;
+    }
+
+    // -------------------------------------------------------------------------
+    // Cursor helpers
+    // -------------------------------------------------------------------------
+
+    private function current(): array
+    {
+        return $this->tokens[$this->position] ?? ['type' => '', 'value' => '', 'name' => '', 'attributes' => ''];
+    }
+
     private function advance(): void
     {
         $this->position++;
     }
-}
 
-// Node classes
-class BlockNode
-{
-    public function __construct(
-        public string $name
-    ) {}
-}
+    private function parserError(string $message): ParserException
+    {
+        $token = $this->current();
+        $tokenType = $token['type'] ?? 'UNKNOWN';
+        $tokenPreview = trim((string) ($token['value'] ?? ($token['name'] ?? '')));
+        if ($tokenPreview === '') {
+            $tokenPreview = '(empty)';
+        }
+        if (strlen($tokenPreview) > 80) {
+            $tokenPreview = substr($tokenPreview, 0, 77) . '...';
+        }
 
-class ForeachNode
-{
-    public function __construct(
-        public string $items,
-        public string $as
-    ) {}
+        $templateFile = (string) ($token['source_file'] ?? '');
+        $line = (int) ($token['source_line'] ?? ($token['line'] ?? 1));
+        $column = (int) ($token['source_column'] ?? ($token['column'] ?? 1));
+        $location = $templateFile !== ''
+            ? " in '{$templateFile}' at line {$line}, column {$column}"
+            : " at line {$line}, column {$column}";
+
+        return new ParserException(
+            sprintf('%s%s at token #%d [%s: %s]', $message, $location, $this->position, $tokenType, $tokenPreview),
+            0,
+            null,
+            [
+                'template_file' => $templateFile,
+                'line' => $line,
+                'column' => $column,
+                'token_type' => $tokenType,
+                'snippet' => $tokenPreview,
+            ],
+            'Template syntax error.'
+        );
+    }
+
+    private function unclosedControlTagsError(): ParserException
+    {
+        $openTags = implode(', ', array_map(
+            static function (array $entry): string {
+                $location = $entry['file'] !== ''
+                    ? " in '{$entry['file']}' at line {$entry['line']}, column {$entry['column']}"
+                    : " at line {$entry['line']}, column {$entry['column']}";
+                return $entry['tag'] . $location;
+            },
+            $this->controlStack
+        ));
+
+        $first = $this->controlStack[0];
+
+        return new ParserException(
+            "Unclosed control tags: {$openTags}",
+            0,
+            null,
+            [
+                'template_file' => $first['file'],
+                'line' => $first['line'],
+                'column' => $first['column'],
+                'token_type' => 'TAG',
+                'snippet' => $first['tag'],
+            ],
+            'Template syntax error.'
+        );
+    }
 }

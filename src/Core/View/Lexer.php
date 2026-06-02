@@ -1,8 +1,8 @@
 <?php
 
-namespace Beobles\Core\View;
+namespace Core\View;
 
-use Beobles\Core\View\Exceptions\SyntaxException;
+use Core\View\Exceptions\SyntaxException;
 
 /**
  * Tokenizador do template
@@ -16,6 +16,9 @@ class Lexer
     private const TOKEN_EXPRESSION = 'EXPRESSION';
     private const TOKEN_ATTRIBUTE = 'ATTRIBUTE';
     private const TOKEN_KEYWORD = 'KEYWORD';
+    /** @var array<int, array{file: string, line: int, column: int}> */
+    private array $charMap = [];
+    private string $content = '';
 
     /**
      * Tokeniza o conteúdo do template
@@ -23,31 +26,46 @@ class Lexer
      * @param string $content Conteúdo do template
      * @return array Tokens
      */
-    public function tokenize(string $content): array
+    public function tokenize(string $content, ?array $charMap = null): array
     {
+        $this->content = $content;
+        $this->charMap = $charMap ?? [];
         $tokens = [];
         $length = strlen($content);
         $pos = 0;
 
         while ($pos < $length) {
-            // Detectar keywords
-            if (strpos($content, 'extends', $pos) === $pos) {
-                $tokens[] = ['type' => 'KEYWORD', 'value' => 'extends'];
-                $pos += 7;
-                continue;
+            $slice = substr($content, $pos);
+
+            // Detectar diretivas por keyword apenas no início da linha.
+            if ($this->isDirectiveLineStart($content, $pos)) {
+                $directive = $this->extractKeywordDirective($content, $pos);
+                if ($directive !== null) {
+                    $tokens[] = $this->withSourceMetadata($directive, $pos);
+                    $pos += $directive['length'];
+                    continue;
+                }
             }
 
-            if (strpos($content, 'import', $pos) === $pos) {
-                $tokens[] = ['type' => 'KEYWORD', 'value' => 'import'];
-                $pos += 6;
+            // Detectar tag de fechamento
+            if ($content[$pos] === '<' && preg_match('/^<\/([A-Z][a-zA-Z0-9]*)\s*>/', $slice, $matches)) {
+                $fullMatch = $matches[0];
+                $tokens[] = [
+                    'type' => 'TAG_CLOSE',
+                    'name' => $matches[1],
+                    'length' => strlen($fullMatch),
+                    'value' => $fullMatch
+                ];
+                $tokens[count($tokens) - 1] = $this->withSourceMetadata($tokens[count($tokens) - 1], $pos);
+                $pos += strlen($fullMatch);
                 continue;
             }
 
             // Detectar tag de abertura
-            if ($content[$pos] === '<' && preg_match('/^<([A-Z][a-zA-Z0-9]*)/', substr($content, $pos), $matches)) {
+            if ($content[$pos] === '<' && preg_match('/^<([A-Z][a-zA-Z0-9]*)/', $slice, $matches)) {
                 // Isso é uma tag customizada
                 $token = $this->extractTag($content, $pos);
-                $tokens[] = $token;
+                $tokens[] = $this->withSourceMetadata($token, $pos);
                 $pos += $token['length'];
                 continue;
             }
@@ -55,7 +73,7 @@ class Lexer
             // Detectar expressão {{ }}
             if (strpos($content, '{{', $pos) === $pos) {
                 $token = $this->extractExpression($content, $pos);
-                $tokens[] = $token;
+                $tokens[] = $this->withSourceMetadata($token, $pos);
                 $pos += $token['length'];
                 continue;
             }
@@ -63,7 +81,7 @@ class Lexer
             // Detectar raw output {! !}
             if (strpos($content, '{!', $pos) === $pos) {
                 $token = $this->extractRaw($content, $pos);
-                $tokens[] = $token;
+                $tokens[] = $this->withSourceMetadata($token, $pos);
                 $pos += $token['length'];
                 continue;
             }
@@ -71,13 +89,24 @@ class Lexer
             // Texto normal
             $textLength = 0;
             while ($pos + $textLength < $length) {
-                if (in_array($content[$pos + $textLength], ['<', '{'])) {
-                    // Verifica se é realmente um token
-                    if (preg_match('/^<[A-Z]/', substr($content, $pos + $textLength))) {
+                $cursor = $pos + $textLength;
+                $char = $content[$cursor];
+
+                if ($char === '<') {
+                    $next = $content[$cursor + 1] ?? '';
+                    $next2 = $content[$cursor + 2] ?? '';
+
+                    if ($next !== '' && ctype_upper($next)) {
                         break;
                     }
-                    if (strpos($content, '{{', $pos + $textLength) === $pos + $textLength ||
-                        strpos($content, '{!', $pos + $textLength) === $pos + $textLength) {
+                    if ($next === '/' && $next2 !== '' && ctype_upper($next2)) {
+                        break;
+                    }
+                }
+
+                if ($char === '{') {
+                    $next = $content[$cursor + 1] ?? '';
+                    if ($next === '{' || $next === '!') {
                         break;
                     }
                 }
@@ -90,6 +119,7 @@ class Lexer
                     'value' => substr($content, $pos, $textLength),
                     'length' => $textLength
                 ];
+                $tokens[count($tokens) - 1] = $this->withSourceMetadata($tokens[count($tokens) - 1], $pos);
                 $pos += $textLength;
             }
         }
@@ -97,85 +127,340 @@ class Lexer
         return $tokens;
     }
 
+    private function isDirectiveLineStart(string $content, int $pos): bool
+    {
+        for ($i = $pos - 1; $i >= 0; $i--) {
+            $char = $content[$i];
+            if ($char === "\n" || $char === "\r") {
+                return true;
+            }
+            if ($char !== ' ' && $char !== "\t") {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function extractKeywordDirective(string $content, int $pos): ?array
+    {
+        $length = strlen($content);
+        $cursor = $pos;
+        while ($cursor < $length && ($content[$cursor] === ' ' || $content[$cursor] === "\t")) {
+            $cursor++;
+        }
+
+        if (preg_match('/\G(extends|import)\b/A', $content, $m, 0, $cursor) !== 1) {
+            return null;
+        }
+
+        $cursor += strlen($m[1]);
+        $quote = null;
+
+        while ($cursor < $length) {
+            $char = $content[$cursor];
+
+            if ($quote !== null) {
+                if ($char === $quote && ($cursor === 0 || $content[$cursor - 1] !== '\\')) {
+                    $quote = null;
+                }
+                $cursor++;
+                continue;
+            }
+
+            if ($char === '"' || $char === "'") {
+                $quote = $char;
+                $cursor++;
+                continue;
+            }
+
+            if ($char === ';') {
+                $directive = substr($content, $pos, ($cursor - $pos) + 1);
+                return [
+                    'type' => self::TOKEN_KEYWORD,
+                    'value' => trim($directive),
+                    'length' => strlen($directive),
+                ];
+            }
+
+            if ($char === "\n" || $char === "\r") {
+                return null;
+            }
+
+            $cursor++;
+        }
+
+        throw $this->syntaxError('Unclosed keyword directive', $pos);
+    }
+
     /**
-     * Extrai uma tag customizada
-     * 
+     * Extrai uma tag customizada usando um scanner de caracteres que lida
+     * corretamente com '>' dentro de valores de atributos (strings entre
+     * aspas e expressões {{ }}).
+     *
      * @param string $content Conteúdo
      * @param int $pos Posição atual
      * @return array Token da tag
      */
     private function extractTag(string $content, int $pos): array
     {
-        preg_match('/^<([A-Z][a-zA-Z0-9]*)([^>]*)\s*\/?>/s', substr($content, $pos), $matches);
+        $length = strlen($content);
+        $cursor = $pos + 1; // avança além do '<'
 
-        if (empty($matches)) {
-            throw new SyntaxException("Invalid tag at position $pos");
+        // Lê o nome da tag: letras, dígitos e underscore
+        $nameStart = $cursor;
+        while ($cursor < $length && (ctype_alnum($content[$cursor]) || $content[$cursor] === '_')) {
+            $cursor++;
+        }
+        $tagName = substr($content, $nameStart, $cursor - $nameStart);
+
+        if ($tagName === '') {
+            throw $this->syntaxError('Invalid tag', $pos);
         }
 
-        $tagName = $matches[1];
-        $attributes = trim($matches[2]);
-        $fullMatch = $matches[0];
-        $selfClosing = str_ends_with($fullMatch, '/>');
+        $attrStart   = $cursor;
+        $attrEnd     = null;
+        $selfClosing = false;
+
+        while ($cursor < $length) {
+            $char = $content[$cursor];
+
+            // Valor de atributo entre aspas — ignora qualquer '>' interno
+            if ($char === '"' || $char === "'") {
+                $quote = $char;
+                $cursor++;
+                while ($cursor < $length && $content[$cursor] !== $quote) {
+                    if ($content[$cursor] === '\\') {
+                        $cursor++; // pula char escapado
+                    }
+                    $cursor++;
+                }
+                if ($cursor < $length) {
+                    $cursor++; // pula a aspa de fechamento
+                }
+                continue;
+            }
+
+            // Expressão de template {{ ... }} — ignora qualquer '>' interno
+            if ($char === '{' && ($content[$cursor + 1] ?? '') === '{') {
+                $cursor += 2;
+                while ($cursor < $length) {
+                    if ($content[$cursor] === '}' && ($content[$cursor + 1] ?? '') === '}') {
+                        $cursor += 2;
+                        break;
+                    }
+                    $cursor++;
+                }
+                continue;
+            }
+
+            // Fechamento auto-fechante: />
+            if ($char === '/' && ($content[$cursor + 1] ?? '') === '>') {
+                $attrEnd     = $cursor;
+                $selfClosing = true;
+                $cursor     += 2;
+                break;
+            }
+
+            // Fechamento normal: >
+            if ($char === '>') {
+                $attrEnd = $cursor;
+                $cursor++;
+                break;
+            }
+
+            $cursor++;
+        }
+
+        if ($attrEnd === null) {
+            throw $this->syntaxError("Unclosed tag '<{$tagName}'", $pos);
+        }
+
+        $attrStr   = substr($content, $attrStart, $attrEnd - $attrStart);
+        $fullMatch = substr($content, $pos, $cursor - $pos);
 
         return [
-            'type' => 'TAG',
-            'name' => $tagName,
-            'attributes' => $attributes,
+            'type'         => 'TAG',
+            'name'         => $tagName,
+            'attributes'   => trim($attrStr),
             'self_closing' => $selfClosing,
-            'length' => strlen($fullMatch),
-            'value' => $fullMatch
+            'length'       => $cursor - $pos,
+            'value'        => $fullMatch,
         ];
     }
 
     /**
      * Extrai uma expressão {{ }}
-     * 
+     *
+     * Usa um scanner de caracteres para ignorar corretamente }}
+     * que apareçam dentro de strings entre aspas na expressão.
+     *
      * @param string $content Conteúdo
      * @param int $pos Posição atual
      * @return array Token da expressão
      */
     private function extractExpression(string $content, int $pos): array
     {
-        $start = $pos + 2;
-        $end = strpos($content, '}}', $start);
+        $length = strlen($content);
+        $cursor = $pos + 2; // avança além de {{
+        $buffer = '';
+        $quote  = null;
 
-        if ($end === false) {
-            throw new SyntaxException("Unclosed expression at position $pos");
+        while ($cursor < $length) {
+            $char = $content[$cursor];
+
+            if ($quote !== null) {
+                if ($char === '\\' && $cursor + 1 < $length) {
+                    $buffer .= $char . $content[$cursor + 1];
+                    $cursor += 2;
+                    continue;
+                }
+                if ($char === $quote) {
+                    $quote = null;
+                }
+                $buffer .= $char;
+                $cursor++;
+                continue;
+            }
+
+            if ($char === '"' || $char === "'") {
+                $quote   = $char;
+                $buffer .= $char;
+                $cursor++;
+                continue;
+            }
+
+            if ($char === '}' && ($content[$cursor + 1] ?? '') === '}') {
+                return [
+                    'type'   => 'EXPRESSION',
+                    'value'  => trim($buffer),
+                    'length' => $cursor - $pos + 2,
+                ];
+            }
+
+            $buffer .= $char;
+            $cursor++;
         }
 
-        $expression = substr($content, $start, $end - $start);
-        $length = $end - $pos + 2;
-
-        return [
-            'type' => 'EXPRESSION',
-            'value' => trim($expression),
-            'length' => $length
-        ];
+        throw $this->syntaxError('Unclosed expression', $pos);
     }
 
     /**
      * Extrai raw output {! !}
-     * 
+     *
+     * Usa um scanner de caracteres para ignorar corretamente !}
+     * que apareçam dentro de strings entre aspas na expressão.
+     *
      * @param string $content Conteúdo
      * @param int $pos Posição atual
      * @return array Token raw
      */
     private function extractRaw(string $content, int $pos): array
     {
-        $start = $pos + 2;
-        $end = strpos($content, '!}', $start);
+        $length = strlen($content);
+        $cursor = $pos + 2; // avança além de {!
+        $buffer = '';
+        $quote  = null;
 
-        if ($end === false) {
-            throw new SyntaxException("Unclosed raw output at position $pos");
+        while ($cursor < $length) {
+            $char = $content[$cursor];
+
+            if ($quote !== null) {
+                if ($char === '\\' && $cursor + 1 < $length) {
+                    $buffer .= $char . $content[$cursor + 1];
+                    $cursor += 2;
+                    continue;
+                }
+                if ($char === $quote) {
+                    $quote = null;
+                }
+                $buffer .= $char;
+                $cursor++;
+                continue;
+            }
+
+            if ($char === '"' || $char === "'") {
+                $quote   = $char;
+                $buffer .= $char;
+                $cursor++;
+                continue;
+            }
+
+            if ($char === '!' && ($content[$cursor + 1] ?? '') === '}') {
+                return [
+                    'type'   => 'RAW',
+                    'value'  => trim($buffer),
+                    'length' => $cursor - $pos + 2,
+                ];
+            }
+
+            $buffer .= $char;
+            $cursor++;
         }
 
-        $expression = substr($content, $start, $end - $start);
-        $length = $end - $pos + 2;
+        throw $this->syntaxError('Unclosed raw output', $pos);
+    }
 
-        return [
-            'type' => 'RAW',
-            'value' => trim($expression),
-            'length' => $length
-        ];
+    private function withSourceMetadata(array $token, int $offset): array
+    {
+        [$line, $column] = $this->resolveLineColumn($offset);
+        $token['line'] = $line;
+        $token['column'] = $column;
+
+        if (isset($this->charMap[$offset])) {
+            $token['source_file'] = $this->charMap[$offset]['file'];
+            $token['source_line'] = $this->charMap[$offset]['line'];
+            $token['source_column'] = $this->charMap[$offset]['column'];
+        } else {
+            $token['source_file'] = '';
+            $token['source_line'] = $line;
+            $token['source_column'] = $column;
+        }
+
+        return $token;
+    }
+
+    /**
+     * @return array{0:int,1:int}
+     */
+    private function resolveLineColumn(int $offset): array
+    {
+        if (isset($this->charMap[$offset])) {
+            return [$this->charMap[$offset]['line'], $this->charMap[$offset]['column']];
+        }
+
+        $prefix = substr($this->content, 0, max(0, $offset));
+        $line = substr_count($prefix, "\n") + 1;
+        $lastBreak = strrpos($prefix, "\n");
+        $column = $lastBreak === false ? strlen($prefix) + 1 : strlen($prefix) - $lastBreak;
+
+        return [$line, $column];
+    }
+
+    private function syntaxError(string $message, int $offset): SyntaxException
+    {
+        [$line, $column] = $this->resolveLineColumn($offset);
+        $source = $this->charMap[$offset] ?? ['file' => '', 'line' => $line, 'column' => $column];
+
+        $snippet = '';
+        $lineStart = strrpos(substr($this->content, 0, $offset), "\n");
+        $lineStart = $lineStart === false ? 0 : $lineStart + 1;
+        $lineEnd = strpos($this->content, "\n", $offset);
+        if ($lineEnd === false) {
+            $lineEnd = strlen($this->content);
+        }
+        $snippet = trim(substr($this->content, $lineStart, $lineEnd - $lineStart));
+        $templateFile = (string) ($source['file'] ?? '');
+        if ($templateFile === '') {
+            $templateFile = '[unknown template]';
+        }
+
+        return SyntaxException::fromLocation(
+            $templateFile,
+            (int) ($source['line'] ?? $line),
+            (int) ($source['column'] ?? $column),
+            $snippet,
+            $message
+        );
     }
 }
