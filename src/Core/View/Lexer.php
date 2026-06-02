@@ -104,15 +104,34 @@ class Lexer
 
         $inSingle = false;
         $inDouble = false;
+        $mustacheDepth = 0;
 
         while ($pos < $length) {
+            if (!$inSingle && !$inDouble && $pos + 1 < $length) {
+                $pair = $content[$pos] . $content[$pos + 1];
+
+                if ($pair === '{{') {
+                    $mustacheDepth++;
+                    $pos += 2;
+                    $column += 2;
+                    continue;
+                }
+
+                if ($pair === '}}' && $mustacheDepth > 0) {
+                    $mustacheDepth--;
+                    $pos += 2;
+                    $column += 2;
+                    continue;
+                }
+            }
+
             $char = $content[$pos];
 
-            if ($char === "'" && !$inDouble) {
+            if ($mustacheDepth === 0 && $char === "'" && !$inDouble) {
                 $inSingle = !$inSingle;
-            } elseif ($char === '"' && !$inSingle) {
+            } elseif ($mustacheDepth === 0 && $char === '"' && !$inSingle) {
                 $inDouble = !$inDouble;
-            } elseif ($char === '>' && !$inSingle && !$inDouble) {
+            } elseif ($char === '>' && !$inSingle && !$inDouble && $mustacheDepth === 0) {
                 $pos++;
                 $column++;
                 break;

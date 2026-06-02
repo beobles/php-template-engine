@@ -11,7 +11,7 @@ class StringFilters
             'lowercase' => fn($v) => self::toLower((string) $v),
             'ucfirst' => fn($v) => self::mbUcfirst((string) $v),
             'trim' => fn($v) => trim((string) $v),
-            'truncate' => fn($v, $len = 50, $suffix = '...') => mb_strlen((string) $v) > (int) $len ? mb_substr((string) $v, 0, (int) $len) . $suffix : (string) $v,
+            'truncate' => fn($v, $len = 50, $suffix = '...') => self::truncate((string) $v, (int) $len, (string) $suffix),
             'slug' => function ($v): string {
                 $v = self::toLower((string) $v);
                 if (function_exists('iconv')) {
@@ -24,6 +24,19 @@ class StringFilters
                 return trim($v, '-');
             },
         ];
+    }
+
+    private static function truncate(string $value, int $length, string $suffix): string
+    {
+        if ($length < 0) {
+            $length = 0;
+        }
+
+        if (self::strLength($value) <= $length) {
+            return $value;
+        }
+
+        return self::strSlice($value, 0, $length) . $suffix;
     }
 
     private static function toUpper(string $value): string
@@ -50,12 +63,32 @@ class StringFilters
             return '';
         }
 
-        if (function_exists('mb_substr')) {
-            $firstChar = mb_substr($value, 0, 1, 'UTF-8');
-            $remaining = mb_substr($value, 1, null, 'UTF-8');
-            return self::toUpper($firstChar) . $remaining;
+        $firstChar = self::strSlice($value, 0, 1);
+        $remaining = self::strSlice($value, 1);
+        if ($firstChar === '') {
+            return '';
         }
 
-        return ucfirst($value);
+        return self::toUpper($firstChar) . $remaining;
+    }
+
+    private static function strLength(string $value): int
+    {
+        if (function_exists('mb_strlen')) {
+            return mb_strlen($value, 'UTF-8');
+        }
+
+        return strlen($value);
+    }
+
+    private static function strSlice(string $value, int $start, ?int $length = null): string
+    {
+        if (function_exists('mb_substr')) {
+            $result = mb_substr($value, $start, $length, 'UTF-8');
+            return $result === false ? '' : $result;
+        }
+
+        $result = $length === null ? substr($value, $start) : substr($value, $start, $length);
+        return $result === false ? '' : $result;
     }
 }

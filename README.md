@@ -82,6 +82,14 @@ import { UserCard } from "@components/UserCard";
 
 Veja [SYNTAX.md](./SYNTAX.md) para documentação completa da sintaxe.
 
+## Validação rápida
+
+```bash
+find . -name '*.php' | xargs php -l
+php examples/index.php
+php examples/edge_matrix.php
+```
+
 ## Estrutura do Projeto
 
 ```

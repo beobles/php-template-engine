@@ -136,7 +136,7 @@ class Compiler
 
     private function compileExpression(string $expression): string
     {
-        $parts = preg_split('/\|/', $expression) ?: [];
+        $parts = $this->splitByPipe($expression);
         $base = trim(array_shift($parts) ?? 'null');
 
         if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $base) === 1) {
@@ -162,6 +162,51 @@ class Compiler
         }
 
         return $compiled;
+    }
+
+    /** @return array<int, string> */
+    private function splitByPipe(string $expression): array
+    {
+        $parts = [];
+        $current = '';
+        $length = strlen($expression);
+        $parenDepth = 0;
+        $inSingle = false;
+        $inDouble = false;
+
+        for ($i = 0; $i < $length; $i++) {
+            $char = $expression[$i];
+
+            if ($char === "'" && !$inDouble) {
+                $inSingle = !$inSingle;
+                $current .= $char;
+                continue;
+            }
+
+            if ($char === '"' && !$inSingle) {
+                $inDouble = !$inDouble;
+                $current .= $char;
+                continue;
+            }
+
+            if (!$inSingle && !$inDouble) {
+                if ($char === '(') {
+                    $parenDepth++;
+                } elseif ($char === ')') {
+                    $parenDepth = max(0, $parenDepth - 1);
+                } elseif ($char === '|' && $parenDepth === 0) {
+                    $parts[] = $current;
+                    $current = '';
+                    continue;
+                }
+            }
+
+            $current .= $char;
+        }
+
+        $parts[] = $current;
+
+        return $parts;
     }
 
     private function transformDotNotation(string $expression): string
