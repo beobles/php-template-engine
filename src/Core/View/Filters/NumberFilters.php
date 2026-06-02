@@ -1,6 +1,6 @@
 <?php
 
-namespace Beobles\Core\View\Filters;
+namespace Core\View\Filters;
 
 class NumberFilters
 {

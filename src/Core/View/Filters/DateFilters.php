@@ -1,13 +1,16 @@
 <?php
 
-namespace Beobles\Core\View\Filters;
+namespace Core\View\Filters;
 
 class DateFilters
 {
     public static function definitions(): array
     {
         return [
-            'date' => fn($v, $format = 'd/m/Y') => date((string) $format, is_numeric($v) ? (int) $v : strtotime((string) $v)),
+            'date' => function ($v, $format = 'd/m/Y'): string {
+                $timestamp = is_numeric($v) ? (int) $v : strtotime((string) $v);
+                return date((string) $format, $timestamp !== false ? $timestamp : time());
+            },
         ];
     }
 }

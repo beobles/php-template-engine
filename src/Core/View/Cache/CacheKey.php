@@ -1,6 +1,6 @@
 <?php
 
-namespace Beobles\Core\View\Cache;
+namespace Core\View\Cache;
 
 class CacheKey
 {
@@ -11,7 +11,8 @@ class CacheKey
         foreach ($dependencies as $dep) {
             $signature .= '|' . $dep;
             if (is_file($dep)) {
-                $signature .= ':' . (string) filemtime($dep);
+                $mtime = filemtime($dep);
+                $signature .= ':' . ($mtime !== false ? (string) $mtime : '0');
             }
         }
 

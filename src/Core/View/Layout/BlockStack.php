@@ -1,6 +1,6 @@
 <?php
 
-namespace Beobles\Core\View\Layout;
+namespace Core\View\Layout;
 
 class BlockStack
 {

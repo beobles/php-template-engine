@@ -1,6 +1,6 @@
 <?php
 
-namespace Beobles\Core\View\Filters;
+namespace Core\View\Filters;
 
 class StringFilters
 {
@@ -11,11 +11,11 @@ class StringFilters
             'lowercase' => fn($v) => strtolower((string) $v),
             'ucfirst' => fn($v) => ucfirst((string) $v),
             'trim' => fn($v) => trim((string) $v),
-            'truncate' => fn($v, $len = 50, $suffix = '...') => strlen((string) $v) > (int) $len ? substr((string) $v, 0, (int) $len) . $suffix : (string) $v,
-            'slug' => function ($v) {
+            'truncate' => fn($v, $len = 50, $suffix = '...') => mb_strlen((string) $v) > (int) $len ? mb_substr((string) $v, 0, (int) $len) . $suffix : (string) $v,
+            'slug' => function ($v): string {
                 $v = strtolower((string) $v);
-                $v = preg_replace('/[^a-z0-9]+/', '-', $v);
-                return trim((string) $v, '-');
+                $v = preg_replace('/[^a-z0-9]+/', '-', $v) ?? '';
+                return trim($v, '-');
             },
         ];
     }

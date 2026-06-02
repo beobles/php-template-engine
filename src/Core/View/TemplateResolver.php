@@ -1,8 +1,8 @@
 <?php
 
-namespace Beobles\Core\View;
+namespace Core\View;
 
-use Beobles\Core\View\Exceptions\ViewException;
+use Core\View\Exceptions\ViewException;
 
 class TemplateResolver
 {
