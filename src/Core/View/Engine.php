@@ -103,7 +103,7 @@ class Engine
                         $this->scopeStack->set((string) $name, $value);
                     }
 
-                    return $this->renderer->render($compiledCode, $runtimeData, $this);
+                    return $this->renderer->render($compiledCode, $runtimeData, $this, $absolutePath);
                 } catch (\Throwable $e) {
                     throw new ViewException("Error rendering template '{$templatePath}': " . $e->getMessage(), 0, $e);
                 }
@@ -198,7 +198,7 @@ class Engine
 
         $tokens = $this->lexer->tokenize($merged, $absolutePath);
         $ast = $this->parser->parse($tokens);
-        $compiledCode = $this->compiler->compile($ast);
+        $compiledCode = $this->compiler->compile($ast, $absolutePath);
 
         if ($this->cacheEnabled) {
             $this->cacheManager->set($cacheKey, $compiledCode);
