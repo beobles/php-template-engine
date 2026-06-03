@@ -1,17 +1,17 @@
 <?php
 
-namespace Beobles\Core\View;
+namespace Core\View;
 
-use Beobles\Core\View\Nodes\BlockNode;
-use Beobles\Core\View\Nodes\ComponentNode;
-use Beobles\Core\View\Nodes\ExpressionNode;
-use Beobles\Core\View\Nodes\ForeachNode;
-use Beobles\Core\View\Nodes\IfNode;
-use Beobles\Core\View\Nodes\IncludeNode;
-use Beobles\Core\View\Nodes\NodeInterface;
-use Beobles\Core\View\Nodes\RawNode;
-use Beobles\Core\View\Nodes\SetNode;
-use Beobles\Core\View\Nodes\TextNode;
+use Core\View\Nodes\BlockNode;
+use Core\View\Nodes\ComponentNode;
+use Core\View\Nodes\ExpressionNode;
+use Core\View\Nodes\ForeachNode;
+use Core\View\Nodes\IfNode;
+use Core\View\Nodes\IncludeNode;
+use Core\View\Nodes\NodeInterface;
+use Core\View\Nodes\RawNode;
+use Core\View\Nodes\SetNode;
+use Core\View\Nodes\TextNode;
 
 class Compiler
 {
@@ -295,9 +295,9 @@ class Compiler
         $source = $this->sourceFile !== '' ? $this->sourceFile : '[inline-template]';
 
         return "<?php\n\n"
-            . "namespace Beobles\\Core\\View\\Compiled;\n\n"
-            . "use Beobles\\Core\\View\\CompiledTemplate;\n"
-            . "use Beobles\\Core\\View\\Engine;\n\n"
+            . "namespace Core\\View\\Compiled;\n\n"
+            . "use Core\\View\\CompiledTemplate;\n"
+            . "use Core\\View\\Engine;\n\n"
             . "/**\n"
             . " * Auto-generated compiled template\n"
             . " * Source: {$source}\n"

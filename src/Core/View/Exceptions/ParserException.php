@@ -1,6 +1,6 @@
 <?php
 
-namespace Beobles\Core\View\Exceptions;
+namespace Core\View\Exceptions;
 
 /**
  * Exceção de parsing

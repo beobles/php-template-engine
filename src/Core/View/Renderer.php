@@ -1,9 +1,9 @@
 <?php
 
-namespace Beobles\Core\View;
+namespace Core\View;
 
-use Beobles\Core\View\Cache\CompiledTemplateCache;
-use Beobles\Core\View\Exceptions\RuntimeException;
+use Core\View\Cache\CompiledTemplateCache;
+use Core\View\Exceptions\RuntimeException;
 
 class Renderer
 {

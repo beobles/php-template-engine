@@ -1,24 +1,24 @@
 <?php
 
-namespace Beobles\Core\View;
+namespace Core\View;
 
-use Beobles\Core\View\Cache\CacheKey;
-use Beobles\Core\View\Cache\CacheManager;
-use Beobles\Core\View\Cache\FileCacheAdapter;
-use Beobles\Core\View\Cache\FileWatcher;
-use Beobles\Core\View\Components\ComponentRegistry;
-use Beobles\Core\View\Debug\TemplateDebugger;
-use Beobles\Core\View\Directives\DirectiveRegistry;
-use Beobles\Core\View\Escape\Escaper;
-use Beobles\Core\View\Exceptions\ViewException;
-use Beobles\Core\View\Filters\FilterRegistry;
-use Beobles\Core\View\Layout\LayoutManager;
-use Beobles\Core\View\Middleware\CacheMiddleware;
-use Beobles\Core\View\Middleware\MiddlewarePipeline;
-use Beobles\Core\View\Middleware\ProfilingMiddleware;
-use Beobles\Core\View\Middleware\SecurityMiddleware;
-use Beobles\Core\View\Scope\ScopeStack;
-use Beobles\Core\View\Validation\TemplateValidator;
+use Core\View\Cache\CacheKey;
+use Core\View\Cache\CacheManager;
+use Core\View\Cache\FileCacheAdapter;
+use Core\View\Cache\FileWatcher;
+use Core\View\Components\ComponentRegistry;
+use Core\View\Debug\TemplateDebugger;
+use Core\View\Directives\DirectiveRegistry;
+use Core\View\Escape\Escaper;
+use Core\View\Exceptions\ViewException;
+use Core\View\Filters\FilterRegistry;
+use Core\View\Layout\LayoutManager;
+use Core\View\Middleware\CacheMiddleware;
+use Core\View\Middleware\MiddlewarePipeline;
+use Core\View\Middleware\ProfilingMiddleware;
+use Core\View\Middleware\SecurityMiddleware;
+use Core\View\Scope\ScopeStack;
+use Core\View\Validation\TemplateValidator;
 
 class Engine
 {
