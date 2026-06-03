@@ -1,6 +1,6 @@
 <?php
 
-namespace Beobles\Core\View\Validation;
+namespace Core\View\Validation;
 
 class TemplateValidator
 {

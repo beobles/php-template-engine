@@ -1,31 +1,33 @@
 <?php
 
-namespace Beobles\Core\View;
+namespace Core\View;
 
-use Beobles\Core\View\Nodes\BlockNode;
-use Beobles\Core\View\Nodes\ComponentNode;
-use Beobles\Core\View\Nodes\ExpressionNode;
-use Beobles\Core\View\Nodes\ForeachNode;
-use Beobles\Core\View\Nodes\IfNode;
-use Beobles\Core\View\Nodes\IncludeNode;
-use Beobles\Core\View\Nodes\NodeInterface;
-use Beobles\Core\View\Nodes\RawNode;
-use Beobles\Core\View\Nodes\SetNode;
-use Beobles\Core\View\Nodes\TextNode;
+use Core\View\Nodes\BlockNode;
+use Core\View\Nodes\ComponentNode;
+use Core\View\Nodes\ExpressionNode;
+use Core\View\Nodes\ForeachNode;
+use Core\View\Nodes\IfNode;
+use Core\View\Nodes\IncludeNode;
+use Core\View\Nodes\NodeInterface;
+use Core\View\Nodes\RawNode;
+use Core\View\Nodes\SetNode;
+use Core\View\Nodes\TextNode;
 
 class Compiler
 {
+    private string $className = '';
+    private string $sourceFile = '';
+
     /** @param array<int, NodeInterface> $nodes */
-    public function compile(array $nodes): string
+    public function compile(array $nodes, string $sourceFile = ''): string
     {
-        $code = "<?php\n";
-        $code .= '$__loop_stack = $__loop_stack ?? [];'."\n";
+        $this->sourceFile = $sourceFile;
+        $this->className = $this->generateClassName($sourceFile);
 
-        foreach ($nodes as $node) {
-            $code .= $this->compileNode($node);
-        }
-
-        return $code;
+        return $this->generateHeader()
+            . $this->generateClassStart()
+            . $this->compileChildren($nodes)
+            . $this->generateClassEnd();
     }
 
     public function compileNode(NodeInterface $node): string
@@ -142,7 +144,7 @@ class Compiler
         if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $base) === 1) {
             $compiled = '$__engine->resolveValue(' . var_export($base, true) . ', get_defined_vars())';
         } else {
-            $compiled = $this->transformDotNotation($base);
+            $compiled = $this->normalizeBareVariables($this->transformDotNotation($base));
         }
 
         foreach ($parts as $part) {
@@ -173,6 +175,91 @@ class Compiler
         ) ?? $expression;
     }
 
+    private function normalizeBareVariables(string $expression): string
+    {
+        $tokens = token_get_all('<?php ' . $expression);
+        if (isset($tokens[0]) && is_array($tokens[0]) && $tokens[0][0] === T_OPEN_TAG) {
+            array_shift($tokens);
+        }
+
+        $result = '';
+        $skip = ['true', 'false', 'null'];
+
+        foreach ($tokens as $index => $token) {
+            if (!is_array($token) || $token[0] !== T_STRING) {
+                $result .= is_array($token) ? $token[1] : $token;
+                continue;
+            }
+
+            $text = $token[1];
+            $lower = strtolower($text);
+            if (in_array($lower, $skip, true)) {
+                $result .= $text;
+                continue;
+            }
+
+            if (preg_match('/^[A-Z_][A-Z0-9_]*$/', $text) === 1) {
+                $result .= $text;
+                continue;
+            }
+
+            $prev = $this->getPreviousSignificantToken($tokens, $index);
+            $next = $this->getNextSignificantToken($tokens, $index);
+            $prevText = is_array($prev) ? $prev[1] : $prev;
+            $nextText = is_array($next) ? $next[1] : $next;
+            $prevType = is_array($prev) ? $prev[0] : null;
+
+            if (
+                $prevText === '$'
+                || $prevText === '->'
+                || $prevText === '::'
+                || $prevText === '\\'
+                || $nextText === '('
+                || $prevType === T_NEW
+                || $prevType === T_FUNCTION
+                || $prevType === T_FN
+            ) {
+                $result .= $text;
+                continue;
+            }
+
+            $result .= '$' . $text;
+        }
+
+        return $result;
+    }
+
+    /** @param array<int, mixed> $tokens */
+    private function getPreviousSignificantToken(array $tokens, int $index): mixed
+    {
+        for ($i = $index - 1; $i >= 0; $i--) {
+            $token = $tokens[$i];
+            if (is_array($token) && in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+                continue;
+            }
+
+            return $token;
+        }
+
+        return null;
+    }
+
+    /** @param array<int, mixed> $tokens */
+    private function getNextSignificantToken(array $tokens, int $index): mixed
+    {
+        $count = count($tokens);
+        for ($i = $index + 1; $i < $count; $i++) {
+            $token = $tokens[$i];
+            if (is_array($token) && in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+                continue;
+            }
+
+            return $token;
+        }
+
+        return null;
+    }
+
     /** @param array<int, NodeInterface> $nodes */
     private function compileChildren(array $nodes): string
     {
@@ -201,5 +288,45 @@ class Compiler
         $lines = explode("\n", rtrim($code, "\n"));
 
         return implode("\n", array_map(static fn(string $line): string => $line === '' ? $line : $indent . $line, $lines)) . "\n";
+    }
+
+    private function generateHeader(): string
+    {
+        $source = $this->sourceFile !== '' ? $this->sourceFile : '[inline-template]';
+
+        return "<?php\n\n"
+            . "namespace Core\\View\\Compiled;\n\n"
+            . "use Core\\View\\CompiledTemplate;\n"
+            . "use Core\\View\\Engine;\n\n"
+            . "/**\n"
+            . " * Auto-generated compiled template\n"
+            . " * Source: {$source}\n"
+            . ' * Generated: ' . date('Y-m-d H:i:s') . "\n"
+            . " */\n";
+    }
+
+    private function generateClassStart(): string
+    {
+        return "\nclass {$this->className} extends CompiledTemplate\n{\n"
+            . "    public function render(array \$data = [], ?Engine \$engine = null): string\n"
+            . "    {\n"
+            . "        \$__engine = \$engine;\n"
+            . "        \$__loop_stack = \$__loop_stack ?? [];\n"
+            . "        extract(\$data, EXTR_SKIP);\n"
+            . "        ob_start();\n\n";
+    }
+
+    private function generateClassEnd(): string
+    {
+        return "\n        return (string) ob_get_clean();\n"
+            . "    }\n"
+            . "}\n\n"
+            . 'return ' . $this->className . "::class;\n";
+    }
+
+    private function generateClassName(string $sourceFile): string
+    {
+        $seed = $sourceFile !== '' ? $sourceFile : uniqid('inline_', true);
+        return 'Template' . strtoupper(hash('crc32b', $seed));
     }
 }

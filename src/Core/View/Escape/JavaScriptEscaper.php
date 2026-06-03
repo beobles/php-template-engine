@@ -1,6 +1,6 @@
 <?php
 
-namespace Beobles\Core\View\Escape;
+namespace Core\View\Escape;
 
 class JavaScriptEscaper
 {

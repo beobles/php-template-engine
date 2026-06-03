@@ -1,6 +1,6 @@
 <?php
 
-namespace Beobles\Core\View\Scope;
+namespace Core\View\Scope;
 
 class Scope
 {

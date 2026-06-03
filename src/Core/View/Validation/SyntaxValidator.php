@@ -1,8 +1,8 @@
 <?php
 
-namespace Beobles\Core\View\Validation;
+namespace Core\View\Validation;
 
-use Beobles\Core\View\Exceptions\SyntaxException;
+use Core\View\Exceptions\SyntaxException;
 
 class SyntaxValidator
 {
