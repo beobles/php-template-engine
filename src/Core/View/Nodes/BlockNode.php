@@ -1,9 +1,9 @@
 <?php
 
-namespace Beobles\Core\View\Nodes;
+namespace Core\View\Nodes;
 
-use Beobles\Core\View\Abstract\AbstractNode;
-use Beobles\Core\View\Compiler;
+use Core\View\Abstract\AbstractNode;
+use Core\View\Compiler;
 
 class BlockNode extends AbstractNode
 {

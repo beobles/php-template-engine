@@ -1,17 +1,17 @@
 <?php
 
-namespace Beobles\Core\View;
+namespace Core\View;
 
-use Beobles\Core\View\Nodes\BlockNode;
-use Beobles\Core\View\Nodes\ComponentNode;
-use Beobles\Core\View\Nodes\ExpressionNode;
-use Beobles\Core\View\Nodes\ForeachNode;
-use Beobles\Core\View\Nodes\IfNode;
-use Beobles\Core\View\Nodes\IncludeNode;
-use Beobles\Core\View\Nodes\NodeInterface;
-use Beobles\Core\View\Nodes\RawNode;
-use Beobles\Core\View\Nodes\SetNode;
-use Beobles\Core\View\Nodes\TextNode;
+use Core\View\Nodes\BlockNode;
+use Core\View\Nodes\ComponentNode;
+use Core\View\Nodes\ExpressionNode;
+use Core\View\Nodes\ForeachNode;
+use Core\View\Nodes\IfNode;
+use Core\View\Nodes\IncludeNode;
+use Core\View\Nodes\NodeInterface;
+use Core\View\Nodes\RawNode;
+use Core\View\Nodes\SetNode;
+use Core\View\Nodes\TextNode;
 
 class Compiler
 {
@@ -138,12 +138,7 @@ class Compiler
     {
         $parts = preg_split('/\|/', $expression) ?: [];
         $base = trim(array_shift($parts) ?? 'null');
-
-        if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $base) === 1) {
-            $compiled = '$__engine->resolveValue(' . var_export($base, true) . ', get_defined_vars())';
-        } else {
-            $compiled = $this->transformDotNotation($base);
-        }
+        $compiled = $this->transformExpression($base);
 
         foreach ($parts as $part) {
             $part = trim($part);
@@ -164,13 +159,152 @@ class Compiler
         return $compiled;
     }
 
-    private function transformDotNotation(string $expression): string
+    private function transformExpression(string $expression): string
     {
-        return preg_replace_callback(
-            '/\b([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+)\b/',
-            fn(array $matches): string => '$__engine->resolveValue(' . var_export($matches[1], true) . ', get_defined_vars())',
+        $expression = trim($expression);
+        if ($expression === '') {
+            return 'null';
+        }
+
+        $expression = $this->transformMemberNotation($expression);
+        return $this->prefixBareIdentifiers($expression);
+    }
+
+    private function transformMemberNotation(string $expression): string
+    {
+        $expression = preg_replace(
+            '/\b([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s*\(/',
+            '\$$1->$2(',
             $expression
         ) ?? $expression;
+
+        return preg_replace_callback(
+            '/\b(\$?[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+)\b/',
+            static function (array $matches): string {
+                $path = $matches[1];
+                $segments = explode('.', ltrim($path, '$'));
+                $result = '$' . array_shift($segments);
+
+                foreach ($segments as $segment) {
+                    $result .= "['{$segment}']";
+                }
+
+                return $result;
+            },
+            $expression
+        ) ?? $expression;
+    }
+
+    private function prefixBareIdentifiers(string $expression): string
+    {
+        $tokens = token_get_all('<?php ' . $expression . ';');
+        $compiled = '';
+
+        $count = count($tokens);
+        for ($i = 1; $i < $count - 1; $i++) {
+            $token = $tokens[$i];
+            if (is_string($token)) {
+                $compiled .= $token;
+                continue;
+            }
+
+            [$id, $text] = $token;
+            if ($id !== T_STRING || !$this->shouldPrefixIdentifier($text, $tokens, $i)) {
+                $compiled .= $text;
+                continue;
+            }
+
+            $compiled .= '$' . $text;
+        }
+
+        return trim($compiled);
+    }
+
+    /** @param array<int, mixed> $tokens */
+    private function shouldPrefixIdentifier(string $text, array $tokens, int $index): bool
+    {
+        $lower = strtolower($text);
+        if (in_array($lower, [
+            'true',
+            'false',
+            'null',
+            'and',
+            'or',
+            'xor',
+            'instanceof',
+            'new',
+            'clone',
+            'default',
+            'match',
+            'fn',
+            'self',
+            'static',
+            'parent',
+        ], true)) {
+            return false;
+        }
+
+        if (preg_match('/^[A-Z_][A-Z0-9_]*$/', $text) === 1) {
+            return false;
+        }
+
+        $prev = $this->previousSignificantToken($tokens, $index);
+        $next = $this->nextSignificantToken($tokens, $index);
+
+        if (($prev['text'] ?? null) === '->' || ($prev['text'] ?? null) === '::' || ($prev['id'] ?? null) === T_VARIABLE) {
+            return false;
+        }
+
+        if (($next['text'] ?? null) === '(') {
+            return false;
+        }
+
+        return true;
+    }
+
+    /** @param array<int, mixed> $tokens
+     *  @return array{id:int|null,text:string|null}
+     */
+    private function previousSignificantToken(array $tokens, int $index): array
+    {
+        for ($i = $index - 1; $i >= 0; $i--) {
+            $token = $tokens[$i];
+            if (is_string($token)) {
+                if (trim($token) !== '') {
+                    return ['id' => null, 'text' => $token];
+                }
+                continue;
+            }
+
+            if ($token[0] !== T_WHITESPACE) {
+                return ['id' => $token[0], 'text' => $token[1]];
+            }
+        }
+
+        return ['id' => null, 'text' => null];
+    }
+
+    /** @param array<int, mixed> $tokens
+     *  @return array{id:int|null,text:string|null}
+     */
+    private function nextSignificantToken(array $tokens, int $index): array
+    {
+        $count = count($tokens);
+        for ($i = $index + 1; $i < $count; $i++) {
+            $token = $tokens[$i];
+            if (is_string($token)) {
+                if (trim($token) !== '') {
+                    return ['id' => null, 'text' => $token];
+                }
+                continue;
+            }
+
+            if ($token[0] !== T_WHITESPACE) {
+                return ['id' => $token[0], 'text' => $token[1]];
+            }
+        }
+
+        return ['id' => null, 'text' => null];
     }
 
     /** @param array<int, NodeInterface> $nodes */

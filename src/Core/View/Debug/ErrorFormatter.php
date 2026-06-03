@@ -1,6 +1,6 @@
 <?php
 
-namespace Beobles\Core\View\Debug;
+namespace Core\View\Debug;
 
 class ErrorFormatter
 {
