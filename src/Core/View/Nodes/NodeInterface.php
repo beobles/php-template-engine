@@ -1,8 +1,8 @@
 <?php
 
-namespace Beobles\Core\View\Nodes;
+namespace Core\View\Nodes;
 
-use Beobles\Core\View\Compiler;
+use Core\View\Compiler;
 
 interface NodeInterface
 {

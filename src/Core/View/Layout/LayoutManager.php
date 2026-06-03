@@ -1,8 +1,8 @@
 <?php
 
-namespace Beobles\Core\View\Layout;
+namespace Core\View\Layout;
 
-use Beobles\Core\View\TemplateResolver;
+use Core\View\TemplateResolver;
 
 class LayoutManager
 {

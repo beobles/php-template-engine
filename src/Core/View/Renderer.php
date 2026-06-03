@@ -1,9 +1,9 @@
 <?php
 
-namespace Beobles\Core\View;
+namespace Core\View;
 
-use Beobles\Core\View\Exceptions\RuntimeException;
-use Beobles\Core\View\Exceptions\SyntaxException;
+use Core\View\Exceptions\RuntimeException;
+use Core\View\Exceptions\SyntaxException;
 
 class Renderer
 {
