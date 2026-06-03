@@ -30,7 +30,7 @@
 <?php
 require_once 'autoload.php';
 
-use Beobles\Core\View\Engine;
+use Core\View\Engine;
 
 $engine = new Engine([
     'templates_dir' => __DIR__ . '/templates',

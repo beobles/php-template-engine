@@ -1,6 +1,6 @@
 <?php
 
-namespace Beobles\Core\View\Abstract;
+namespace Core\View\Abstract;
 
 abstract class AbstractFilter
 {
