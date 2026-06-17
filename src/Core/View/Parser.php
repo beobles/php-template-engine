@@ -78,6 +78,12 @@ class Parser
         switch ($tagName) {
             case 'If':
                 return $this->parseIfTag($token);
+            case 'Unless':
+                $unless = $this->parseIfTag($token);
+                $unless->condition = '!' . $unless->condition;
+                return $unless;
+            case 'ElseIf':
+                return new ElseIfNode($this->parseIfTag($token)->condition);
             case 'Block':
                 return $this->parseBlockTag($token);
             case 'Foreach':
@@ -228,6 +234,13 @@ class ForeachNode
 
 class ElseNode
 {
+}
+
+class ElseIfNode
+{
+    public function __construct(
+        public string $condition
+    ) {}
 }
 
 class EndNode

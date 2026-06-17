@@ -243,10 +243,50 @@ class Engine
     public function isTruthy(string $expression, array $data): bool
     {
         $expression = trim($expression);
+
+        foreach (['||', '&&'] as $operator) {
+            $parts = $this->splitExpression($expression, $operator);
+            if (count($parts) > 1) {
+                $results = array_map(fn($part) => $this->isTruthy($part, $data), $parts);
+                return $operator === '||' ? in_array(true, $results, true) : !in_array(false, $results, true);
+            }
+        }
+
         if (str_starts_with($expression, '!')) {
             return !$this->isTruthy(substr($expression, 1), $data);
         }
+
+        foreach (['===', '!==', '>=', '<=', '==', '!=', '>', '<'] as $operator) {
+            $parts = $this->splitExpression($expression, $operator);
+            if (count($parts) === 2) {
+                [$left, $right] = $parts;
+                $leftValue = $this->evaluateExpression($left, $data);
+                $rightValue = $this->evaluateExpression($right, $data);
+
+                return match ($operator) {
+                    '===' => $leftValue === $rightValue,
+                    '!==' => $leftValue !== $rightValue,
+                    '==' => $leftValue == $rightValue,
+                    '!=' => $leftValue != $rightValue,
+                    '>=' => $leftValue >= $rightValue,
+                    '<=' => $leftValue <= $rightValue,
+                    '>' => $leftValue > $rightValue,
+                    '<' => $leftValue < $rightValue,
+                };
+            }
+        }
+
         return (bool) $this->evaluateExpression($expression, $data);
+    }
+
+    private function splitExpression(string $expression, string $operator): array
+    {
+        $parts = preg_split('/\s*' . preg_quote($operator, '/') . '\s*/', $expression, 2);
+        if ($parts === false || count($parts) < 2 || trim($parts[0]) === '' || trim($parts[1]) === '') {
+            return [trim($expression)];
+        }
+
+        return array_map('trim', $parts);
     }
 
     private function evaluateValue(string $expression, array $data)

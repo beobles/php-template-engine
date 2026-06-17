@@ -44,6 +44,7 @@ class Compiler
             'BlockNode' => $this->compileBlock($node),
             'ForeachNode' => $this->compileForeach($node),
             'ElseNode' => '} else {' . "\n",
+            'ElseIfNode' => $this->compileElseIf($node),
             'EndNode' => $this->compileEnd($node),
             default => ''
         };
@@ -141,8 +142,13 @@ class Compiler
         }
         return 'foreach ((array) ' . $iterable . ' as $' . $valueName . ') { $__data[' . var_export($valueName, true) . '] = $' . $valueName . ';' . "\n";
     }
+    private function compileElseIf(object $node): string
+    {
+        return '} elseif ($__engine->isTruthy(' . var_export($node->condition, true) . ', $__data)) {' . "\n";
+    }
+
     private function compileEnd(object $node): string
     {
-        return in_array($node->name, ['If', 'Foreach'], true) ? '} ' . "\n" : '';
+        return in_array($node->name, ['If', 'Unless', 'Foreach'], true) ? '} ' . "\n" : '';
     }
 }

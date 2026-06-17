@@ -30,16 +30,11 @@ class Lexer
         $pos = 0;
 
         while ($pos < $length) {
-            // Detectar keywords
-            if (strpos($content, 'extends', $pos) === $pos) {
-                $tokens[] = ['type' => 'KEYWORD', 'value' => 'extends'];
-                $pos += 7;
-                continue;
-            }
-
-            if (strpos($content, 'import', $pos) === $pos) {
-                $tokens[] = ['type' => 'KEYWORD', 'value' => 'import'];
-                $pos += 6;
+            // Detectar keywords de template e consumir a instrução completa.
+            if (preg_match('/^(extends|import)\b/i', substr($content, $pos))) {
+                $token = $this->extractKeyword($content, $pos);
+                $tokens[] = $token;
+                $pos += $token['length'];
                 continue;
             }
 
@@ -71,6 +66,13 @@ class Lexer
             // Texto normal
             $textLength = 0;
             while ($pos + $textLength < $length) {
+                if (preg_match('/^(extends|import)\b/i', substr($content, $pos + $textLength))) {
+                    $previous = $pos + $textLength === 0 ? "\n" : $content[$pos + $textLength - 1];
+                    if ($previous === "\n" || $previous === "\r") {
+                        break;
+                    }
+                }
+
                 if (in_array($content[$pos + $textLength], ['<', '{'])) {
                     // Verifica se é realmente um token
                     if (preg_match('/^<\/?[A-Z]/', substr($content, $pos + $textLength))) {
@@ -95,6 +97,30 @@ class Lexer
         }
 
         return $tokens;
+    }
+
+    /**
+     * Extrai uma keyword de template (extends/import) sem deixar resíduos no HTML.
+     *
+     * @param string $content Conteúdo
+     * @param int $pos Posição atual
+     * @return array Token da keyword
+     */
+    private function extractKeyword(string $content, int $pos): array
+    {
+        if (!preg_match('/^(extends|import)\b([^;\r\n]*)(;?)/i', substr($content, $pos), $matches)) {
+            throw new SyntaxException("Invalid keyword at position $pos");
+        }
+
+        $fullMatch = $matches[0];
+
+        return [
+            'type' => 'KEYWORD',
+            'name' => strtolower($matches[1]),
+            'value' => trim($matches[2]),
+            'length' => strlen($fullMatch),
+            'statement' => trim($fullMatch),
+        ];
     }
 
     /**
