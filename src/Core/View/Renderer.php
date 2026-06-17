@@ -3,30 +3,23 @@
 namespace Beobles\Core\View;
 
 /**
- * Renderizador de templates compilados
+ * Renderizador de templates compilados.
  */
 class Renderer
 {
-    /**
-     * Renderiza código PHP compilado
-     * 
-     * @param string $compiledCode Código PHP compilado
-     * @param array $data Dados para o template
-     * @param Engine $engine Instância do engine
-     * @return string Output renderizado
-     */
     public function render(string $compiledCode, array $data = [], Engine $engine = null): string
     {
-        // Criar escopo de variáveis
-        extract($data, EXTR_SKIP);
+        $__data = $data;
         $__engine = $engine;
 
-        // Capturar output
         ob_start();
         try {
-            eval('?>' . $compiledCode);
-            return ob_get_clean();
-        } catch (\Exception $e) {
+            (static function () use ($compiledCode, $__data, $__engine): void {
+                extract($__data, EXTR_SKIP);
+                eval('?>' . $compiledCode);
+            })();
+            return (string) ob_get_clean();
+        } catch (\Throwable $e) {
             ob_end_clean();
             throw $e;
         }

@@ -27,6 +27,7 @@ class Engine
     private CacheManager $cacheManager;
     private ComponentRegistry $componentRegistry;
     private FilterRegistry $filterRegistry;
+    private int $cacheTtl;
 
     /**
      * Construtor do Engine
@@ -40,10 +41,11 @@ class Engine
      */
     public function __construct(array $config = [])
     {
-        $this->templatesDir = $config['templates_dir'] ?? __DIR__ . '/../../../templates';
-        $this->cacheDir = $config['cache_dir'] ?? __DIR__ . '/../../../cache';
+        $this->templatesDir = $this->normalizeDirectory($config['templates_dir'] ?? __DIR__ . '/../../../templates');
+        $this->cacheDir = $this->normalizeDirectory($config['cache_dir'] ?? __DIR__ . '/../../../cache', false);
         $this->autoEscape = $config['auto_escape'] ?? true;
         $this->cacheEnabled = $config['cache_enabled'] ?? true;
+        $this->cacheTtl = (int) ($config['cache_ttl'] ?? 0);
 
         // Validar diretórios
         if (!is_dir($this->templatesDir)) {
@@ -107,7 +109,7 @@ class Engine
 
             // Cachear se habilitado
             if ($this->cacheEnabled) {
-                $this->cacheManager->set($cacheKey, $compiledCode);
+                $this->cacheManager->set($cacheKey, $compiledCode, $this->cacheTtl);
             }
 
             // Renderizar
@@ -159,7 +161,15 @@ class Engine
             $path .= '.html';
         }
 
-        return $this->templatesDir . '/' . $path;
+        $candidate = $this->templatesDir . DIRECTORY_SEPARATOR . ltrim($path, DIRECTORY_SEPARATOR);
+        $resolved = realpath($candidate);
+        $base = realpath($this->templatesDir);
+
+        if ($resolved === false || $base === false || !str_starts_with($resolved, $base . DIRECTORY_SEPARATOR)) {
+            throw new ViewException("Template path is outside templates directory: {$path}");
+        }
+
+        return $resolved;
     }
 
     /**
@@ -170,7 +180,7 @@ class Engine
      */
     private function generateCacheKey(string $path): string
     {
-        return 'template_' . md5($path);
+        return 'template_' . hash('sha256', $path . '|' . filemtime($this->resolveTemplatePath($path)) . '|' . filesize($this->resolveTemplatePath($path)));
     }
 
     /**
@@ -207,6 +217,90 @@ class Engine
     public function getEnvironment(): Environment
     {
         return $this->environment;
+    }
+
+
+    public function evaluateExpression(string $expression, array $data)
+    {
+        $parts = array_map('trim', explode('|', $expression));
+        $value = $this->evaluateValue(array_shift($parts), $data);
+
+        foreach ($parts as $filterExpression) {
+            if ($filterExpression === '') {
+                continue;
+            }
+            $segments = array_map('trim', explode(':', $filterExpression, 2));
+            $args = [];
+            if (isset($segments[1])) {
+                $args = array_map(fn($arg) => $this->evaluateValue(trim($arg), $data), explode(',', $segments[1]));
+            }
+            $value = $this->applyFilter($value, $segments[0], $args);
+        }
+
+        return $value;
+    }
+
+    public function isTruthy(string $expression, array $data): bool
+    {
+        $expression = trim($expression);
+        if (str_starts_with($expression, '!')) {
+            return !$this->isTruthy(substr($expression, 1), $data);
+        }
+        return (bool) $this->evaluateExpression($expression, $data);
+    }
+
+    private function evaluateValue(string $expression, array $data)
+    {
+        $expression = trim($expression);
+        if (preg_match('/^(.+?)\s*\?\?\s*(.+)$/', $expression, $matches)) {
+            $value = $this->evaluateValue($matches[1], $data);
+            return $value ?? $this->evaluateValue($matches[2], $data);
+        }
+        if ((str_starts_with($expression, '"') && str_ends_with($expression, '"')) || (str_starts_with($expression, "'") && str_ends_with($expression, "'"))) {
+            return stripcslashes(substr($expression, 1, -1));
+        }
+        if (is_numeric($expression)) {
+            return $expression + 0;
+        }
+        return match (strtolower($expression)) {
+            'true' => true,
+            'false' => false,
+            'null' => null,
+            default => $this->resolveDataPath($expression, $data),
+        };
+    }
+
+    private function resolveDataPath(string $path, array $data)
+    {
+        $value = $data;
+        foreach (explode('.', $path) as $segment) {
+            $segment = trim($segment);
+            if ($segment === '') {
+                return null;
+            }
+            if (is_array($value) && array_key_exists($segment, $value)) {
+                $value = $value[$segment];
+                continue;
+            }
+            if (is_object($value) && isset($value->{$segment})) {
+                $value = $value->{$segment};
+                continue;
+            }
+            return null;
+        }
+        return $value;
+    }
+
+    private function normalizeDirectory(string $directory, bool $mustExist = true): string
+    {
+        $resolved = realpath($directory);
+        if ($resolved === false) {
+            if ($mustExist) {
+                throw new ViewException("Directory not found: {$directory}");
+            }
+            return rtrim($directory, DIRECTORY_SEPARATOR);
+        }
+        return $resolved;
     }
 
     /**

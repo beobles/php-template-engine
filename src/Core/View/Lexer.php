@@ -44,7 +44,7 @@ class Lexer
             }
 
             // Detectar tag de abertura
-            if ($content[$pos] === '<' && preg_match('/^<([A-Z][a-zA-Z0-9]*)/', substr($content, $pos), $matches)) {
+            if ($content[$pos] === '<' && preg_match('/^<\/?([A-Z][a-zA-Z0-9]*)/', substr($content, $pos), $matches)) {
                 // Isso é uma tag customizada
                 $token = $this->extractTag($content, $pos);
                 $tokens[] = $token;
@@ -73,7 +73,7 @@ class Lexer
             while ($pos + $textLength < $length) {
                 if (in_array($content[$pos + $textLength], ['<', '{'])) {
                     // Verifica se é realmente um token
-                    if (preg_match('/^<[A-Z]/', substr($content, $pos + $textLength))) {
+                    if (preg_match('/^<\/?[A-Z]/', substr($content, $pos + $textLength))) {
                         break;
                     }
                     if (strpos($content, '{{', $pos + $textLength) === $pos + $textLength ||
@@ -106,19 +106,20 @@ class Lexer
      */
     private function extractTag(string $content, int $pos): array
     {
-        preg_match('/^<([A-Z][a-zA-Z0-9]*)([^>]*)\s*\/?>/s', substr($content, $pos), $matches);
+        preg_match('/^<(\/?)([A-Z][a-zA-Z0-9]*)([^>]*)\s*\/?>/s', substr($content, $pos), $matches);
 
         if (empty($matches)) {
             throw new SyntaxException("Invalid tag at position $pos");
         }
 
-        $tagName = $matches[1];
-        $attributes = trim($matches[2]);
+        $closing = $matches[1] === '/';
+        $tagName = $matches[2];
+        $attributes = trim($matches[3]);
         $fullMatch = $matches[0];
         $selfClosing = str_ends_with($fullMatch, '/>');
 
         return [
-            'type' => 'TAG',
+            'type' => $closing ? 'TAG_CLOSE' : 'TAG',
             'name' => $tagName,
             'attributes' => $attributes,
             'self_closing' => $selfClosing,

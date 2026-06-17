@@ -42,6 +42,9 @@ class Parser
             } elseif ($token['type'] === 'RAW') {
                 $nodes[] = new RawNode($token['value']);
                 $this->advance();
+            } elseif ($token['type'] === 'TAG_CLOSE') {
+                $nodes[] = new EndNode($token['name']);
+                $this->advance();
             } elseif ($token['type'] === 'TAG') {
                 $node = $this->parseTag();
                 if ($node) {
@@ -79,6 +82,8 @@ class Parser
                 return $this->parseBlockTag($token);
             case 'Foreach':
                 return $this->parseForEachTag($token);
+            case 'Else':
+                return new ElseNode();
             case 'Component':
             case preg_match('/^[A-Z]/', $tagName) ? $tagName : null:
                 return $this->parseComponentTag($token);
@@ -217,5 +222,17 @@ class ForeachNode
     public function __construct(
         public string $items,
         public string $as
+    ) {}
+}
+
+
+class ElseNode
+{
+}
+
+class EndNode
+{
+    public function __construct(
+        public string $name
     ) {}
 }
