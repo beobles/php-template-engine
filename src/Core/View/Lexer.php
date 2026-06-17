@@ -30,21 +30,16 @@ class Lexer
         $pos = 0;
 
         while ($pos < $length) {
-            // Detectar keywords
-            if (strpos($content, 'extends', $pos) === $pos) {
-                $tokens[] = ['type' => 'KEYWORD', 'value' => 'extends'];
-                $pos += 7;
-                continue;
-            }
-
-            if (strpos($content, 'import', $pos) === $pos) {
-                $tokens[] = ['type' => 'KEYWORD', 'value' => 'import'];
-                $pos += 6;
+            // Detectar keywords de template e consumir a instrução completa.
+            if (preg_match('/^(extends|import)\b/i', substr($content, $pos))) {
+                $token = $this->extractKeyword($content, $pos);
+                $tokens[] = $token;
+                $pos += $token['length'];
                 continue;
             }
 
             // Detectar tag de abertura
-            if ($content[$pos] === '<' && preg_match('/^<([A-Z][a-zA-Z0-9]*)/', substr($content, $pos), $matches)) {
+            if ($content[$pos] === '<' && preg_match('/^<\/?([A-Z][a-zA-Z0-9]*)/', substr($content, $pos), $matches)) {
                 // Isso é uma tag customizada
                 $token = $this->extractTag($content, $pos);
                 $tokens[] = $token;
@@ -71,9 +66,16 @@ class Lexer
             // Texto normal
             $textLength = 0;
             while ($pos + $textLength < $length) {
+                if (preg_match('/^(extends|import)\b/i', substr($content, $pos + $textLength))) {
+                    $previous = $pos + $textLength === 0 ? "\n" : $content[$pos + $textLength - 1];
+                    if ($previous === "\n" || $previous === "\r") {
+                        break;
+                    }
+                }
+
                 if (in_array($content[$pos + $textLength], ['<', '{'])) {
                     // Verifica se é realmente um token
-                    if (preg_match('/^<[A-Z]/', substr($content, $pos + $textLength))) {
+                    if (preg_match('/^<\/?[A-Z]/', substr($content, $pos + $textLength))) {
                         break;
                     }
                     if (strpos($content, '{{', $pos + $textLength) === $pos + $textLength ||
@@ -98,6 +100,30 @@ class Lexer
     }
 
     /**
+     * Extrai uma keyword de template (extends/import) sem deixar resíduos no HTML.
+     *
+     * @param string $content Conteúdo
+     * @param int $pos Posição atual
+     * @return array Token da keyword
+     */
+    private function extractKeyword(string $content, int $pos): array
+    {
+        if (!preg_match('/^(extends|import)\b([^;\r\n]*)(;?)/i', substr($content, $pos), $matches)) {
+            throw new SyntaxException("Invalid keyword at position $pos");
+        }
+
+        $fullMatch = $matches[0];
+
+        return [
+            'type' => 'KEYWORD',
+            'name' => strtolower($matches[1]),
+            'value' => trim($matches[2]),
+            'length' => strlen($fullMatch),
+            'statement' => trim($fullMatch),
+        ];
+    }
+
+    /**
      * Extrai uma tag customizada
      * 
      * @param string $content Conteúdo
@@ -106,19 +132,20 @@ class Lexer
      */
     private function extractTag(string $content, int $pos): array
     {
-        preg_match('/^<([A-Z][a-zA-Z0-9]*)([^>]*)\s*\/?>/s', substr($content, $pos), $matches);
+        preg_match('/^<(\/?)([A-Z][a-zA-Z0-9]*)([^>]*)\s*\/?>/s', substr($content, $pos), $matches);
 
         if (empty($matches)) {
             throw new SyntaxException("Invalid tag at position $pos");
         }
 
-        $tagName = $matches[1];
-        $attributes = trim($matches[2]);
+        $closing = $matches[1] === '/';
+        $tagName = $matches[2];
+        $attributes = trim($matches[3]);
         $fullMatch = $matches[0];
         $selfClosing = str_ends_with($fullMatch, '/>');
 
         return [
-            'type' => 'TAG',
+            'type' => $closing ? 'TAG_CLOSE' : 'TAG',
             'name' => $tagName,
             'attributes' => $attributes,
             'self_closing' => $selfClosing,

@@ -33,7 +33,7 @@ class Compiler
      */
     private function compileNode(object $node): string
     {
-        $class = class_basename($node);
+        $class = substr(strrchr('\\' . get_class($node), '\\'), 1);
 
         return match ($class) {
             'TextNode' => $this->compileText($node),
@@ -43,6 +43,9 @@ class Compiler
             'IfNode' => $this->compileIf($node),
             'BlockNode' => $this->compileBlock($node),
             'ForeachNode' => $this->compileForeach($node),
+            'ElseNode' => '} else {' . "\n",
+            'ElseIfNode' => $this->compileElseIf($node),
+            'EndNode' => $this->compileEnd($node),
             default => ''
         };
     }
@@ -66,8 +69,7 @@ class Compiler
      */
     private function compileExpression(object $node): string
     {
-        $escaped = 'htmlspecialchars(' . $node->value . ', ENT_QUOTES, "UTF-8")';
-        return 'echo ' . $escaped . ";\n";
+        return 'echo htmlspecialchars((string) $__engine->evaluateExpression(' . var_export($node->value, true) . ', $__data), ENT_QUOTES | ENT_SUBSTITUTE, "UTF-8");' . "\n";
     }
 
     /**
@@ -78,7 +80,7 @@ class Compiler
      */
     private function compileRaw(object $node): string
     {
-        return 'echo ' . $node->value . ";\n";
+        return 'echo (string) $__engine->evaluateExpression(' . var_export($node->value, true) . ', $__data);' . "\n";
     }
 
     /**
@@ -90,7 +92,7 @@ class Compiler
     private function compileComponent(object $node): string
     {
         $props = 'array(' . implode(', ', array_map(
-            fn($k, $v) => "'" . $k . "' => " . $v,
+            fn($k, $v) => var_export((string) $k, true) . ' => $__engine->evaluateExpression(' . var_export((string) $v, true) . ', $__data)',
             array_keys($node->attributes),
             $node->attributes
         )) . ')';
@@ -106,7 +108,7 @@ class Compiler
      */
     private function compileIf(object $node): string
     {
-        return 'if (' . $node->condition . ") {\n";
+        return 'if ($__engine->isTruthy(' . var_export($node->condition, true) . ', $__data)) {' . "\n";
     }
 
     /**
@@ -128,6 +130,25 @@ class Compiler
      */
     private function compileForeach(object $node): string
     {
-        return 'foreach (' . $node->items . ' as ' . $node->as . ") {\n";
+        [$valueName, $keyName] = array_map('trim', explode(',', $node->as . ','));
+        foreach (array_filter([$valueName, $keyName]) as $name) {
+            if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $name)) {
+                throw new \InvalidArgumentException('Invalid foreach variable name: ' . $name);
+            }
+        }
+        $iterable = '$__engine->evaluateExpression(' . var_export($node->items, true) . ', $__data)';
+        if ($keyName !== '') {
+            return 'foreach ((array) ' . $iterable . ' as $' . $keyName . ' => $' . $valueName . ') { $__data[' . var_export($keyName, true) . '] = $' . $keyName . '; $__data[' . var_export($valueName, true) . '] = $' . $valueName . ';' . "\n";
+        }
+        return 'foreach ((array) ' . $iterable . ' as $' . $valueName . ') { $__data[' . var_export($valueName, true) . '] = $' . $valueName . ';' . "\n";
+    }
+    private function compileElseIf(object $node): string
+    {
+        return '} elseif ($__engine->isTruthy(' . var_export($node->condition, true) . ', $__data)) {' . "\n";
+    }
+
+    private function compileEnd(object $node): string
+    {
+        return in_array($node->name, ['If', 'Unless', 'Foreach'], true) ? '} ' . "\n" : '';
     }
 }

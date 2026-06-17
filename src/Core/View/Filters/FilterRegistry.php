@@ -54,10 +54,10 @@ class FilterRegistry
     private function registerDefaultFilters(): void
     {
         // String filters
-        $this->register('uppercase', fn($v) => strtoupper($v));
-        $this->register('lowercase', fn($v) => strtolower($v));
+        $this->register('uppercase', fn($v) => function_exists('mb_strtoupper') ? mb_strtoupper((string) $v, 'UTF-8') : strtoupper((string) $v));
+        $this->register('lowercase', fn($v) => function_exists('mb_strtolower') ? mb_strtolower((string) $v, 'UTF-8') : strtolower((string) $v));
         $this->register('ucfirst', fn($v) => ucfirst($v));
-        $this->register('reverse', fn($v) => strrev($v));
+        $this->register('reverse', fn($v) => is_array($v) ? array_reverse($v) : strrev((string) $v));
         $this->register('trim', fn($v) => trim($v));
         $this->register('ltrim', fn($v) => ltrim($v));
         $this->register('rtrim', fn($v) => rtrim($v));
@@ -83,7 +83,6 @@ class FilterRegistry
         $this->register('count', fn($v) => count($v));
         $this->register('first', fn($v) => $v[0] ?? null);
         $this->register('last', fn($v) => end($v));
-        $this->register('reverse', fn($v) => array_reverse($v));
         $this->register('join', fn($v, $sep = ',') => implode($sep, $v));
 
         // JSON
